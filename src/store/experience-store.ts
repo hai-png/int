@@ -384,6 +384,9 @@ export interface ExperienceState {
 
   // Auto-save
   autoSave: () => void
+
+  // Server project ID (persisted to survive refresh)
+  serverProjectId: string | null
 }
 
 const defaultPostProcessing: PostProcessingConfig = {
@@ -550,6 +553,9 @@ export const useExperienceStore = create<ExperienceState>()(
       pathTracerEnabled: false,
       pathTracerSamples: 0,
       pathTracerMaxSamples: 512,
+
+      // Server project ID
+      serverProjectId: null,
 
       // ── Project ───────────────────────────────────
       setProjectName: (name) => set({ projectName: name, isDirty: true }),
@@ -830,6 +836,7 @@ export const useExperienceStore = create<ExperienceState>()(
       // ── History (Undo/Redo) ──────────────────────
       pushHistory: () => {
         const s = get()
+        // Snapshot only data fields — never include history/historyIndex
         const snapshot = {
           hotspots: JSON.parse(JSON.stringify(s.hotspots)),
           uiPanels: JSON.parse(JSON.stringify(s.uiPanels)),
@@ -838,6 +845,12 @@ export const useExperienceStore = create<ExperienceState>()(
           environment: JSON.parse(JSON.stringify(s.environment)),
           camera: JSON.parse(JSON.stringify(s.camera)),
           model: s.model ? JSON.parse(JSON.stringify(s.model)) : null,
+          sceneNodes: JSON.parse(JSON.stringify(s.sceneNodes)),
+          lights: JSON.parse(JSON.stringify(s.lights)),
+          scenes: JSON.parse(JSON.stringify(s.scenes)),
+          activeSceneId: s.activeSceneId,
+          measurements: JSON.parse(JSON.stringify(s.measurements)),
+          annotations: JSON.parse(JSON.stringify(s.annotations)),
         }
         const newHistory = s.history.slice(0, s.historyIndex + 1)
         newHistory.push(snapshot)
@@ -849,10 +862,23 @@ export const useExperienceStore = create<ExperienceState>()(
         const s = get()
         if (s.historyIndex <= 0) return
         const newIndex = s.historyIndex - 1
-        const snapshot = s.history[newIndex]
+        const snapshot = s.history[newIndex] as Record<string, unknown>
         if (snapshot) {
+          // Explicitly restore only data fields, preserving current history/historyIndex
           set({
-            ...snapshot,
+            hotspots: snapshot.hotspots as Hotspot[],
+            uiPanels: snapshot.uiPanels as UIPanel[],
+            variables: snapshot.variables as Variable[],
+            theme: snapshot.theme as ThemeConfig,
+            environment: snapshot.environment as EnvironmentConfig,
+            camera: snapshot.camera as CameraConfig,
+            model: snapshot.model as ModelConfig | null,
+            sceneNodes: snapshot.sceneNodes as SceneNode[],
+            lights: snapshot.lights as LightConfig[],
+            scenes: snapshot.scenes as SceneConfig[],
+            activeSceneId: snapshot.activeSceneId as string,
+            measurements: snapshot.measurements as Measurement[],
+            annotations: snapshot.annotations as Annotation[],
             historyIndex: newIndex,
             isDirty: true,
           })
@@ -863,10 +889,23 @@ export const useExperienceStore = create<ExperienceState>()(
         const s = get()
         if (s.historyIndex >= s.history.length - 1) return
         const newIndex = s.historyIndex + 1
-        const snapshot = s.history[newIndex]
+        const snapshot = s.history[newIndex] as Record<string, unknown>
         if (snapshot) {
+          // Explicitly restore only data fields, preserving current history/historyIndex
           set({
-            ...snapshot,
+            hotspots: snapshot.hotspots as Hotspot[],
+            uiPanels: snapshot.uiPanels as UIPanel[],
+            variables: snapshot.variables as Variable[],
+            theme: snapshot.theme as ThemeConfig,
+            environment: snapshot.environment as EnvironmentConfig,
+            camera: snapshot.camera as CameraConfig,
+            model: snapshot.model as ModelConfig | null,
+            sceneNodes: snapshot.sceneNodes as SceneNode[],
+            lights: snapshot.lights as LightConfig[],
+            scenes: snapshot.scenes as SceneConfig[],
+            activeSceneId: snapshot.activeSceneId as string,
+            measurements: snapshot.measurements as Measurement[],
+            annotations: snapshot.annotations as Annotation[],
             historyIndex: newIndex,
             isDirty: true,
           })
@@ -890,6 +929,9 @@ export const useExperienceStore = create<ExperienceState>()(
           scenes: s.scenes,
           activeSceneId: s.activeSceneId,
           measurements: s.measurements,
+          lights: s.lights,
+          annotations: s.annotations,
+          sceneNodes: s.sceneNodes,
         }
       },
 
@@ -917,11 +959,23 @@ export const useExperienceStore = create<ExperienceState>()(
           scenes: (data.scenes as SceneConfig[]) || [{ id: uid(), name: 'Scene 1', model: null, hotspots: [], environment: defaultEnvironment, cameraBookmarks: [] }],
           activeSceneId: (data.activeSceneId as string) || '',
           measurements: (data.measurements as Measurement[]) || [],
+          lights: (data.lights as LightConfig[]) || defaultLights,
+          annotations: (data.annotations as Annotation[]) || [],
+          sceneNodes: (data.sceneNodes as SceneNode[]) || [],
           isDirty: false,
           selectedHotspotId: null,
           selectedNodeId: null,
+          selectedAnnotationId: null,
           isPreviewMode: false,
           isAddingHotspot: false,
+          isMeasuring: false,
+          showGrid: true,
+          showStats: false,
+          showShortcutsModal: false,
+          activePreviewPanel: null,
+          previewToasts: [],
+          history: [],
+          historyIndex: -1,
         })
       },
 
@@ -976,7 +1030,7 @@ export const useExperienceStore = create<ExperienceState>()(
         set((s) => {
           const scene = s.scenes.find((sc) => sc.id === id)
           if (!scene) return s
-          // Save current scene state first
+          // Save current scene state first (including lights, annotations, sceneNodes)
           const updatedScenes = s.scenes.map((sc) =>
             sc.id === s.activeSceneId
               ? { ...sc, model: s.model, hotspots: s.hotspots, environment: s.environment, cameraBookmarks: s.cameraBookmarks }
@@ -1109,8 +1163,8 @@ export const useExperienceStore = create<ExperienceState>()(
               lights: s.lights,
             },
           }
-          // Check if we have a saved server project ID
-          const serverId = (globalThis as Record<string, unknown>).__serverProjectId as string | undefined
+          // Check if we have a saved server project ID — stored in persisted state for durability
+          const serverId = s.serverProjectId
           if (serverId) {
             fetch(`/api/projects/${serverId}`, {
               method: 'PUT',
@@ -1128,7 +1182,9 @@ export const useExperienceStore = create<ExperienceState>()(
               .then((res) => res.json())
               .then((data) => {
                 if (data.id) {
-                  ;(globalThis as Record<string, unknown>).__serverProjectId = data.id
+                  // Persist server project ID in Zustand store instead of globalThis
+                  // so it survives page refreshes
+                  set({ serverProjectId: data.id })
                 }
               })
               .catch(() => {
@@ -1163,6 +1219,7 @@ export const useExperienceStore = create<ExperienceState>()(
         annotations: state.annotations,
         pathTracerEnabled: state.pathTracerEnabled,
         pathTracerMaxSamples: state.pathTracerMaxSamples,
+        serverProjectId: state.serverProjectId,
       }),
       merge: (persisted, current) => {
         const p = persisted as Partial<ExperienceState>
@@ -1190,6 +1247,7 @@ export const useExperienceStore = create<ExperienceState>()(
           pathTracerEnabled: (p.pathTracerEnabled as boolean) ?? false,
           pathTracerMaxSamples: (p.pathTracerMaxSamples as number) ?? 512,
           pathTracerSamples: 0,
+          serverProjectId: (p.serverProjectId as string | null) ?? null,
           selectedAnnotationId: null,
         }
       },

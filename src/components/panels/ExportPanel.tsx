@@ -805,7 +805,11 @@ export default function MyExperience() {
         {/* Reset */}
         <div className="px-3 py-3">
           <button
-            onClick={resetProject}
+            onClick={() => {
+              if (window.confirm('Are you sure you want to reset this project? This action cannot be undone.')) {
+                resetProject()
+              }
+            }}
             className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 hover:bg-red-500/20 transition-colors text-xs font-medium"
           >
             <RotateCcw size={14} />

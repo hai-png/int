@@ -27,7 +27,7 @@ import {
   type LightConfig,
   type SceneNode,
 } from '@/store/experience-store'
-import { EffectComposer, Bloom, Vignette, DepthOfField, ChromaticAberration, N8AO } from '@react-three/postprocessing'
+import { EffectComposer, Bloom, Vignette, DepthOfField, ChromaticAberration, N8AO, BrightnessContrast, HueSaturation } from '@react-three/postprocessing'
 import * as THREE from 'three'
 
 // ─── Hotspot 3D Marker ────────────────────────────────────
@@ -83,87 +83,9 @@ function HotspotMarker({
     }
   }, [isPreview, hovered, hotspot.id])
 
-  // 2D hotspots render as screen-space overlay elements
+  // 2D hotspots are rendered by the shared Hotspot2DOverlay component
   if (type === '2D') {
-    const offsetX = offset?.[0] ?? 50
-    const offsetY = offset?.[1] ?? 50
-    return (
-      <Html fullscreen style={{ pointerEvents: 'none' }} zIndexRange={[100, 0]}>
-        <div
-          style={{
-            position: 'absolute',
-            left: `${offsetX}%`,
-            top: `${offsetY}%`,
-            transform: 'translate(-50%, -100%)',
-            pointerEvents: 'auto',
-            cursor: isPreview ? 'pointer' : 'default',
-          }}
-          onClick={(e) => {
-            e.stopPropagation()
-            onClick()
-            if (isPreview) {
-              executeBehaviors(hotspot.id, 'onClick')
-            }
-          }}
-          onPointerEnter={() => setHovered(true)}
-          onPointerLeave={() => setHovered(false)}
-        >
-          <div style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            gap: 4,
-          }}>
-            {/* Flat pin icon style for 2D */}
-            <div style={{
-              width: hovered || isSelected ? 28 : 24,
-              height: hovered || isSelected ? 28 : 24,
-              borderRadius: '50% 50% 50% 0',
-              background: iconColor,
-              transform: 'rotate(-45deg)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              boxShadow: `0 2px 8px ${iconColor}66`,
-              transition: 'all 0.15s ease',
-            }}>
-              <span style={{
-                transform: 'rotate(45deg)',
-                fontSize: 10,
-                lineHeight: 1,
-              }}>
-                {icon || '📌'}
-              </span>
-            </div>
-            {/* Small triangle pointing down */}
-            <div style={{
-              width: 0,
-              height: 0,
-              borderLeft: '5px solid transparent',
-              borderRight: '5px solid transparent',
-              borderTop: `6px solid ${iconColor}`,
-              marginTop: -4,
-            }} />
-            {/* Label */}
-            {showLabel && (
-              <div style={{
-                background: 'rgba(0,0,0,0.85)',
-                color: '#fff',
-                padding: '3px 8px',
-                borderRadius: '4px',
-                fontSize: '11px',
-                whiteSpace: 'nowrap',
-                fontFamily: 'Inter, sans-serif',
-                border: `1px solid ${iconColor}`,
-                marginTop: 2,
-              }}>
-                {label}
-              </div>
-            )}
-          </div>
-        </div>
-      </Html>
-    )
+    return null
   }
 
   // 3D hotspots - original sphere + ring marker
@@ -228,6 +150,153 @@ function HotspotMarker({
         </Html>
       )}
     </group>
+  )
+}
+
+// ─── Shared 2D Hotspot Overlay (single fullscreen Html) ────
+
+function Hotspot2DOverlay({ hotspots, iconColor, labelStyle, selectedHotspotId, isPreview, onHotspotClick }: {
+  hotspots: Hotspot[]
+  iconColor: string
+  labelStyle: string
+  selectedHotspotId: string | null
+  isPreview: boolean
+  onHotspotClick: (id: string) => void
+}) {
+  const hotspots2D = hotspots.filter((h) => h.visible && h.type === '2D')
+
+  if (hotspots2D.length === 0) return null
+
+  return (
+    <Html fullscreen style={{ pointerEvents: 'none' }} zIndexRange={[100, 0]}>
+      <div style={{ position: 'absolute', inset: 0 }}>
+        {hotspots2D.map((hotspot) => (
+          <Hotspot2DItem
+            key={hotspot.id}
+            hotspot={hotspot}
+            iconColor={iconColor}
+            labelStyle={labelStyle}
+            isSelected={selectedHotspotId === hotspot.id}
+            isPreview={isPreview}
+            onClick={() => onHotspotClick(hotspot.id)}
+          />
+        ))}
+      </div>
+    </Html>
+  )
+}
+
+function Hotspot2DItem({ hotspot, iconColor, labelStyle, isSelected, isPreview, onClick }: {
+  hotspot: Hotspot
+  iconColor: string
+  labelStyle: string
+  isSelected: boolean
+  isPreview: boolean
+  onClick: () => void
+}) {
+  const [hovered, setHovered] = useState(false)
+  const hoverExecutedRef = useRef(false)
+  const { offset, icon, label, position } = hotspot
+  const offsetX = offset?.[0] ?? 50
+  const offsetY = offset?.[1] ?? 50
+  const showLabel =
+    labelStyle === 'always' || (labelStyle === 'hover' && hovered) || isSelected
+
+  // Handle hover behaviors in preview mode
+  useEffect(() => {
+    if (isPreview && hovered && !hoverExecutedRef.current) {
+      hoverExecutedRef.current = true
+      const state = useExperienceStore.getState()
+      const h = state.hotspots.find((hs) => hs.id === hotspot.id)
+      if (h) {
+        for (const behavior of h.behaviors) {
+          if (behavior.trigger === 'onHover') {
+            for (const action of behavior.actions) {
+              executeAction(action)
+            }
+          }
+        }
+      }
+    }
+    if (!hovered) {
+      hoverExecutedRef.current = false
+    }
+  }, [isPreview, hovered, hotspot.id])
+
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        left: `${offsetX}%`,
+        top: `${offsetY}%`,
+        transform: 'translate(-50%, -100%)',
+        pointerEvents: 'auto',
+        cursor: isPreview ? 'pointer' : 'default',
+      }}
+      onClick={(e) => {
+        e.stopPropagation()
+        onClick()
+        if (isPreview) {
+          executeBehaviors(hotspot.id, 'onClick')
+        }
+      }}
+      onPointerEnter={() => setHovered(true)}
+      onPointerLeave={() => setHovered(false)}
+    >
+      <div style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        gap: 4,
+      }}>
+        {/* Flat pin icon style for 2D */}
+        <div style={{
+          width: hovered || isSelected ? 28 : 24,
+          height: hovered || isSelected ? 28 : 24,
+          borderRadius: '50% 50% 50% 0',
+          background: iconColor,
+          transform: 'rotate(-45deg)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          boxShadow: `0 2px 8px ${iconColor}66`,
+          transition: 'all 0.15s ease',
+        }}>
+          <span style={{
+            transform: 'rotate(45deg)',
+            fontSize: 10,
+            lineHeight: 1,
+          }}>
+            {icon || '📌'}
+          </span>
+        </div>
+        {/* Small triangle pointing down */}
+        <div style={{
+          width: 0,
+          height: 0,
+          borderLeft: '5px solid transparent',
+          borderRight: '5px solid transparent',
+          borderTop: `6px solid ${iconColor}`,
+          marginTop: -4,
+        }} />
+        {/* Label */}
+        {showLabel && (
+          <div style={{
+            background: 'rgba(0,0,0,0.85)',
+            color: '#fff',
+            padding: '3px 8px',
+            borderRadius: '4px',
+            fontSize: '11px',
+            whiteSpace: 'nowrap',
+            fontFamily: 'Inter, sans-serif',
+            border: `1px solid ${iconColor}`,
+            marginTop: 2,
+          }}>
+            {label}
+          </div>
+        )}
+      </div>
+    </div>
   )
 }
 
@@ -357,12 +426,27 @@ function LoadedModel({ url, scale, position, rotation, onClick }: {
   onClick?: (e: ThreeEvent<MouseEvent>) => void
 }) {
   const { scene } = useGLTF(url)
-  const cloned = useMemo(() => scene.clone(true), [scene])
+  const clonedScene = useMemo(() => scene.clone(true), [scene])
+
+  // Dispose the cloned scene when it's replaced or on unmount
+  useEffect(() => {
+    const clone = clonedScene
+    return () => {
+      clone.traverse((obj: THREE.Object3D) => {
+        if ((obj as THREE.Mesh).geometry) (obj as THREE.Mesh).geometry.dispose()
+        if ((obj as THREE.Mesh).material) {
+          const meshMat = (obj as THREE.Mesh).material
+          const mats: THREE.Material[] = Array.isArray(meshMat) ? meshMat : [meshMat]
+          mats.forEach((m) => m.dispose())
+        }
+      })
+    }
+  }, [clonedScene])
 
   return (
     <Center>
       <primitive
-        object={cloned}
+        object={clonedScene}
         scale={scale}
         position={position}
         rotation={rotation}
@@ -438,12 +522,42 @@ class ErrorBoundary extends React.Component<
 function ClickToAddHotspot() {
   const { isAddingHotspot, addingHotspotType, addHotspot, setAddingHotspot, theme } =
     useExperienceStore()
+  const { scene, raycaster, camera, gl } = useThree()
+  const groundPlane = useMemo(() => new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), [])
 
-  const handleClick = useCallback(
-    (e: ThreeEvent<MouseEvent>) => {
+  const handlePointerDown = useCallback(
+    (e: ThreeEvent<PointerEvent>) => {
       if (!isAddingHotspot) return
       e.stopPropagation()
-      const point = e.point
+
+      // Re-raycast against all scene objects to get accurate hit points on real geometry
+      const rect = gl.domElement.getBoundingClientRect()
+      const mouse = new THREE.Vector2(
+        ((e.nativeEvent.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.nativeEvent.clientY - rect.top) / rect.height) * 2 + 1
+      )
+      raycaster.setFromCamera(mouse, camera)
+
+      // Intersect with all scene objects (recursive)
+      const allIntersects = raycaster.intersectObjects(scene.children, true)
+      // Filter out invisible/fully-transparent helper meshes (like our click catcher)
+      const realHit = allIntersects.find((i) => {
+        const mesh = i.object as THREE.Mesh
+        const mat = mesh.material as THREE.MeshBasicMaterial
+        return mesh.visible && (mat.opacity === undefined || mat.opacity > 0)
+      })
+
+      let point: THREE.Vector3
+      if (realHit) {
+        point = realHit.point.clone()
+      } else {
+        // Fall back to ground plane (Y=0) intersection
+        const target = new THREE.Vector3()
+        const hit = raycaster.ray.intersectPlane(groundPlane, target)
+        if (!hit) return
+        point = target
+      }
+
       const id = `hs_${Date.now()}`
       addHotspot({
         id,
@@ -458,20 +572,22 @@ function ClickToAddHotspot() {
       })
       setAddingHotspot(false)
     },
-    [isAddingHotspot, addingHotspotType, addHotspot, setAddingHotspot, theme]
+    [isAddingHotspot, addingHotspotType, addHotspot, setAddingHotspot, theme, scene, raycaster, camera, gl, groundPlane]
   )
 
   if (!isAddingHotspot) return null
 
+  // Use a large invisible plane as a click catcher.
+  // On click, we re-raycast against actual scene geometry for accurate placement.
   return (
     <mesh
       rotation={[-Math.PI / 2, 0, 0]}
-      position={[0, 0, 0]}
+      position={[0, -0.01, 0]}
       visible={false}
-      onClick={handleClick}
+      onPointerDown={handlePointerDown}
     >
-      <planeGeometry args={[50, 50]} />
-      <meshBasicMaterial transparent opacity={0} />
+      <planeGeometry args={[500, 500]} />
+      <meshBasicMaterial transparent opacity={0} depthWrite={false} />
     </mesh>
   )
 }
@@ -525,6 +641,47 @@ function CameraController() {
         targetPos.current = null
         targetLookAt.current = null
         isAnimating.current = false
+      }
+    }
+  })
+
+  return null
+}
+
+// ─── Proximity Checker (executes onProximity behaviors) ────
+
+function ProximityChecker() {
+  const { hotspots, isPreviewMode } = useExperienceStore()
+  const { camera } = useThree()
+  const proximityMapRef = useRef<Map<string, boolean>>(new Map())
+  const PROXIMITY_DISTANCE = 3
+
+  useFrame(() => {
+    if (!isPreviewMode) return
+
+    const camPos = camera.position
+
+    for (const hotspot of hotspots) {
+      // Only check 3D hotspots with onProximity behaviors
+      if (!hotspot.visible || hotspot.type === '2D') continue
+      const hasProximityBehavior = hotspot.behaviors.some((b) => b.trigger === 'onProximity')
+      if (!hasProximityBehavior) continue
+
+      const dx = camPos.x - hotspot.position[0]
+      const dy = camPos.y - hotspot.position[1]
+      const dz = camPos.z - hotspot.position[2]
+      const distance = Math.sqrt(dx * dx + dy * dy + dz * dz)
+
+      const inProximity = distance < PROXIMITY_DISTANCE
+      const wasInProximity = proximityMapRef.current.get(hotspot.id) ?? false
+
+      if (inProximity && !wasInProximity) {
+        // Camera entered proximity zone — trigger behaviors
+        executeBehaviors(hotspot.id, 'onProximity')
+        proximityMapRef.current.set(hotspot.id, true)
+      } else if (!inProximity && wasInProximity) {
+        // Camera left proximity zone — mark as exited so it can re-trigger
+        proximityMapRef.current.set(hotspot.id, false)
       }
     }
   })
@@ -722,11 +879,14 @@ function PostProcessingEffects() {
     vignette, vignetteOffset, vignetteDarkness,
     depthOfField, dofFocusDistance, dofFocalLength, dofBokehScale,
     chromaticAberration, caOffset,
-    colorGrading,
+    colorGrading, cgBrightness, cgContrast, cgSaturation,
     screenSpaceReflections,
   } = pp
 
   const anyEffect = bloom || ssao || vignette || depthOfField || chromaticAberration || colorGrading || screenSpaceReflections
+
+  // Hooks must be called before any early return
+  const caOffsetVec = useMemo(() => new THREE.Vector2(caOffset ?? 0.002, caOffset ?? 0.002), [caOffset])
 
   if (!anyEffect && !pathTracerEnabled) return null
 
@@ -768,7 +928,7 @@ function PostProcessingEffects() {
     effects.push(
       <ChromaticAberration
         key="ca"
-        offset={[caOffset ?? 0.002, caOffset ?? 0.002] as unknown as THREE.Vector2}
+        offset={caOffsetVec}
         radialModulation={false}
         modulationOffset={0}
       />
@@ -778,6 +938,29 @@ function PostProcessingEffects() {
     effects.push(
       <Vignette key="vig" eskil={false} offset={vignetteOffset ?? 0.1} darkness={vignetteDarkness ?? 0.8} />
     )
+  }
+  if (colorGrading) {
+    effects.push(
+      <BrightnessContrast
+        key="bc"
+        brightness={cgBrightness ?? 0}
+        contrast={cgContrast ?? 0}
+      />
+    )
+    // Apply saturation via HueSaturation (hue=0 means no hue shift)
+    if ((cgSaturation ?? 0) !== 0) {
+      effects.push(
+        <HueSaturation
+          key="hs"
+          hue={0}
+          saturation={cgSaturation ?? 0}
+        />
+      )
+    }
+  }
+  if (screenSpaceReflections) {
+    // SSR effect is not available in @react-three/postprocessing v3.x
+    // Silently skipped — the UI toggle remains in ThemePanel for project compatibility
   }
 
   return (
@@ -1026,9 +1209,12 @@ const transformModeState = {
   },
 }
 
-// Expose to other components (like EditorLayout toolbar)
-if (typeof window !== 'undefined') {
-  ;(globalThis as Record<string, unknown>).__transformMode = transformModeState
+// Expose to other components (like EditorLayout toolbar) — lazy initialization
+function getTransformModeState() {
+  if (typeof window !== 'undefined' && !(globalThis as Record<string, unknown>).__transformMode) {
+    ;(globalThis as Record<string, unknown>).__transformMode = transformModeState
+  }
+  return transformModeState
 }
 
 // ─── Object Transform Controls (for scene nodes) ──────────
@@ -1090,10 +1276,10 @@ function ObjectTransformControls() {
     if (!controlsRef.current || !targetObject) return
     const controls = controlsRef.current
     // Store targetObject in a local variable to avoid TS narrowing issues in the closure
-    const obj = targetObject
+    const obj: THREE.Object3D = targetObject
 
     const onObjectChange = () => {
-      if (obj && selectedNodeId) {
+      if (selectedNodeId) {
         const pos = obj.position
         const rot = obj.rotation
         const scl = obj.scale
@@ -1238,37 +1424,233 @@ function evaluateCondition(condition: string | undefined): boolean {
   const state = useExperienceStore.getState()
 
   try {
-    // Replace variable names with their values from the store
-    let expr = condition.trim()
+    // Build a context object from store variables for safe lookup
+    const context: Record<string, unknown> = {}
     for (const v of state.variables) {
-      const regex = new RegExp(`\\b${escapeRegex(v.name)}\\b`, 'g')
-      expr = expr.replace(regex, JSON.stringify(v.value))
+      context[v.name] = v.value
     }
-    return safeEval(expr)
+    return safeEval(condition.trim(), context)
   } catch {
     console.warn('[Condition] Failed to evaluate:', condition)
     return true // If evaluation fails, execute anyway
   }
 }
 
-// Escape special regex characters in variable names
-function escapeRegex(str: string): string {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+// ─── Safe Expression Evaluator (recursive descent parser) ──
+// Supports: ===, !==, >, <, >=, <=, &&, ||, !, true, false, numbers, quoted strings, variables
+// NEVER uses eval or new Function
+
+type Token =
+  | { type: 'boolean'; value: boolean }
+  | { type: 'number'; value: number }
+  | { type: 'string'; value: string }
+  | { type: 'identifier'; value: string }
+  | { type: 'op'; value: '===' | '!==' | '>=' | '<=' | '>' | '<' | '&&' | '||' | '!' }
+  | { type: 'lparen' }
+  | { type: 'rparen' }
+
+function tokenize(expr: string): Token[] | null {
+  const tokens: Token[] = []
+  let i = 0
+  while (i < expr.length) {
+    // Skip whitespace
+    if (/\s/.test(expr[i])) { i++; continue }
+
+    // Two/three character operators
+    if (expr.startsWith('===', i)) { tokens.push({ type: 'op', value: '===' }); i += 3; continue }
+    if (expr.startsWith('!==', i)) { tokens.push({ type: 'op', value: '!==' }); i += 3; continue }
+    if (expr.startsWith('>=', i))  { tokens.push({ type: 'op', value: '>=' });  i += 2; continue }
+    if (expr.startsWith('<=', i))  { tokens.push({ type: 'op', value: '<=' });  i += 2; continue }
+    if (expr.startsWith('&&', i))  { tokens.push({ type: 'op', value: '&&' });  i += 2; continue }
+    if (expr.startsWith('||', i))  { tokens.push({ type: 'op', value: '||' });  i += 2; continue }
+
+    // Single character operators
+    if (expr[i] === '>') { tokens.push({ type: 'op', value: '>' }); i++; continue }
+    if (expr[i] === '<') { tokens.push({ type: 'op', value: '<' }); i++; continue }
+    if (expr[i] === '!') { tokens.push({ type: 'op', value: '!' }); i++; continue }
+
+    // Parentheses
+    if (expr[i] === '(') { tokens.push({ type: 'lparen' }); i++; continue }
+    if (expr[i] === ')') { tokens.push({ type: 'rparen' }); i++; continue }
+
+    // Number literal
+    const numMatch = expr.slice(i).match(/^\d+(\.\d+)?/)
+    if (numMatch) {
+      tokens.push({ type: 'number', value: parseFloat(numMatch[0]) })
+      i += numMatch[0].length
+      continue
+    }
+
+    // Boolean / identifier
+    const wordMatch = expr.slice(i).match(/^[a-zA-Z_]\w*/)
+    if (wordMatch) {
+      const word = wordMatch[0]
+      if (word === 'true') { tokens.push({ type: 'boolean', value: true }) }
+      else if (word === 'false') { tokens.push({ type: 'boolean', value: false }) }
+      else { tokens.push({ type: 'identifier', value: word }) }
+      i += word.length
+      continue
+    }
+
+    // String literal (double-quoted)
+    if (expr[i] === '"') {
+      const end = expr.indexOf('"', i + 1)
+      if (end === -1) return null // Unterminated string
+      tokens.push({ type: 'string', value: expr.slice(i + 1, end) })
+      i = end + 1
+      continue
+    }
+
+    // String literal (single-quoted)
+    if (expr[i] === "'") {
+      const end = expr.indexOf("'", i + 1)
+      if (end === -1) return null // Unterminated string
+      tokens.push({ type: 'string', value: expr.slice(i + 1, end) })
+      i = end + 1
+      continue
+    }
+
+    // Unknown character
+    return null
+  }
+  return tokens
 }
 
-// Safe expression evaluator — only allows comparison and logical operators
-// Supports: ===, !==, >, <, >=, <=, &&, ||, !, true, false, numbers, quoted strings
-function safeEval(expr: string): boolean {
-  // Whitelist: only allow safe tokens
-  // Tokens: numbers, booleans, strings in quotes, comparison/logical operators, parens, whitespace
-  const safePattern = /^(?:\s*(?:true|false|(?:\d+(?:\.\d+)?)|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|===|!==|>=|<=|>|<|&&|\|\||!|\(|\))\s*)+$/
-  if (!safePattern.test(expr)) {
+class SafeExprParser {
+  private tokens: Token[]
+  private pos: number
+  private context: Record<string, unknown>
+
+  constructor(tokens: Token[], context: Record<string, unknown>) {
+    this.tokens = tokens
+    this.pos = 0
+    this.context = context
+  }
+
+  parse(): unknown {
+    try {
+      const result = this.parseOr()
+      if (this.pos < this.tokens.length) return false // Extra tokens
+      return result
+    } catch {
+      return false
+    }
+  }
+
+  private peek(): Token | null {
+    return this.pos < this.tokens.length ? this.tokens[this.pos] : null
+  }
+
+  private consume(): Token {
+    return this.tokens[this.pos++]
+  }
+
+  /** Check if the current token is an operator with the given value */
+  private isOp(value: string): boolean {
+    const t = this.peek()
+    return t !== null && t.type === 'op' && t.value === value
+  }
+
+  /** Check if the current token is an operator with one of the given values */
+  private isOpIn(values: string[]): boolean {
+    const t = this.peek()
+    return t !== null && t.type === 'op' && values.includes(t.value)
+  }
+
+  /** Consume the current operator token and return its value */
+  private consumeOp(): string {
+    return (this.consume() as { type: 'op'; value: string }).value
+  }
+
+  // Precedence: OR < AND < EQUALITY < COMPARISON < UNARY < PRIMARY
+
+  private parseOr(): unknown {
+    let left = this.parseAnd()
+    while (this.isOp('||')) {
+      this.consume()
+      const right = this.parseAnd()
+      left = !!(left) || !!(right)
+    }
+    return left
+  }
+
+  private parseAnd(): unknown {
+    let left = this.parseEquality()
+    while (this.isOp('&&')) {
+      this.consume()
+      const right = this.parseEquality()
+      left = !!(left) && !!(right)
+    }
+    return left
+  }
+
+  private parseEquality(): unknown {
+    let left = this.parseComparison()
+    while (this.isOpIn(['===', '!=='])) {
+      const op = this.consumeOp()
+      const right = this.parseComparison()
+      if (op === '===') left = left === right
+      else left = left !== right
+    }
+    return left
+  }
+
+  private parseComparison(): unknown {
+    let left = this.parseUnary()
+    while (this.isOpIn(['>', '<', '>=', '<='])) {
+      const op = this.consumeOp()
+      const right = this.parseUnary()
+      const l = typeof left === 'number' ? left : Number(left)
+      const r = typeof right === 'number' ? right : Number(right)
+      if (op === '>') left = l > r
+      else if (op === '<') left = l < r
+      else if (op === '>=') left = l >= r
+      else left = l <= r
+    }
+    return left
+  }
+
+  private parseUnary(): unknown {
+    if (this.isOp('!')) {
+      this.consume()
+      return !this.parseUnary()
+    }
+    return this.parsePrimary()
+  }
+
+  private parsePrimary(): unknown {
+    const token = this.peek()
+    if (!token) throw new Error('Unexpected end of expression')
+
+    if (token.type === 'boolean') { this.consume(); return token.value }
+    if (token.type === 'number')  { this.consume(); return token.value }
+    if (token.type === 'string')  { this.consume(); return token.value }
+    if (token.type === 'identifier') {
+      this.consume()
+      return this.context[token.value] ?? false
+    }
+    if (token.type === 'lparen') {
+      this.consume()
+      const result = this.parseOr()
+      const closing = this.peek()
+      if (!closing || closing.type !== 'rparen') throw new Error('Missing closing parenthesis')
+      this.consume()
+      return result
+    }
+
+    throw new Error('Unexpected token')
+  }
+}
+
+function safeEval(expr: string, context: Record<string, unknown> = {}): boolean {
+  const tokens = tokenize(expr)
+  if (!tokens) {
     console.warn('[Condition] Unsafe expression rejected:', expr)
     return false
   }
+  const parser = new SafeExprParser(tokens, context)
   try {
-    // Now it's safe to evaluate — only whitelisted tokens are present
-    const result = new Function(`return (${expr})`)()
+    const result = parser.parse()
     return !!result
   } catch {
     return false
@@ -1303,6 +1685,10 @@ function executeAction(action: ActionDef) {
           action.duration || 1000
         )
       } else if (action.action === 'orbit') {
+        // Clear any existing orbit interval before starting a new one
+        if ((globalThis as Record<string, unknown>).__orbitInterval != null) {
+          clearInterval((globalThis as Record<string, unknown>).__orbitInterval as ReturnType<typeof setInterval>)
+        }
         const center = action.position || [0, 0, 0]
         const radius = 5
         const speed = action.speed || 0.5
@@ -1311,7 +1697,7 @@ function executeAction(action: ActionDef) {
           const ctrl2 = (globalThis as Record<string, unknown>).__cameraController as {
             animateTo: (pos: Vec3, lookAt: Vec3, duration: number) => void
           } | undefined
-          if (!ctrl2) { clearInterval(orbitInterval); return }
+          if (!ctrl2) { clearInterval(orbitInterval); (globalThis as Record<string, unknown>).__orbitInterval = null; return }
           angle += speed * 0.05
           ctrl2.animateTo(
             [center[0] + Math.cos(angle) * radius, center[1] + 2, center[2] + Math.sin(angle) * radius],
@@ -1319,7 +1705,8 @@ function executeAction(action: ActionDef) {
             50
           )
         }, 50)
-        setTimeout(() => clearInterval(orbitInterval), action.duration || 5000)
+        ;(globalThis as Record<string, unknown>).__orbitInterval = orbitInterval
+        setTimeout(() => { clearInterval(orbitInterval); (globalThis as Record<string, unknown>).__orbitInterval = null }, action.duration || 5000)
       }
       break
     }
@@ -1344,9 +1731,9 @@ function executeAction(action: ActionDef) {
       const sceneRef = (globalThis as Record<string, unknown>).__r3fScene as THREE.Scene | undefined
       if (sceneRef && action.target) {
         sceneRef.traverse((obj) => {
-          if (obj.name === action.target || (obj as THREE.Mesh).material) {
+          if ((obj as THREE.Mesh).material && obj.name === action.target) {
             const mesh = obj as THREE.Mesh
-            if (mesh.material && mesh.name === action.target) {
+            if (mesh.material) {
               const mat = mesh.material as THREE.MeshStandardMaterial
               if (action.property === 'color' && action.value) {
                 mat.color.set(action.value as string)
@@ -1504,29 +1891,47 @@ function executeAction(action: ActionDef) {
 
 // ─── Viewport Overlay Controls ────────────────────────────
 
-function ViewportOverlayControls() {
+function ViewportOverlayControls({ containerRef }: { containerRef: React.RefObject<HTMLDivElement | null> }) {
   const { theme, setShowGrid, showGrid, showStats, setShowStats, isPreviewMode, cameraBookmarks, setCamera } = useExperienceStore()
   const [isFullscreen, setIsFullscreen] = useState(false)
 
-  const toggleFullscreen = useCallback(() => {
-    if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen()
-      setIsFullscreen(true)
-    } else {
-      document.exitFullscreen()
-      setIsFullscreen(false)
+  // Listen for fullscreenchange events to track state accurately
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement)
+    }
+    document.addEventListener('fullscreenchange', handleFullscreenChange)
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange)
     }
   }, [])
+
+  const toggleFullscreen = useCallback(() => {
+    if (!document.fullscreenElement) {
+      if (containerRef.current) {
+        containerRef.current.requestFullscreen()
+      }
+    } else {
+      document.exitFullscreen()
+    }
+  }, [containerRef])
 
   const zoomIn = useCallback(() => {
     const ctrl = (globalThis as Record<string, unknown>).__cameraController as {
       animateTo: (pos: Vec3, lookAt: Vec3, duration: number) => void
       getPosition: () => Vec3
     } | undefined
+    const orbitTarget = (globalThis as Record<string, unknown>).__orbitControlsTarget as THREE.Vector3 | undefined
     if (ctrl) {
       const pos = ctrl.getPosition()
-      const dir = [0, 0, 0].map((_, i) => pos[i] * 0.8) as Vec3
-      ctrl.animateTo(dir, [0, 0, 0], 300)
+      // Dolly toward the orbit target (or origin), not just toward [0,0,0]
+      const target: Vec3 = orbitTarget ? [orbitTarget.x, orbitTarget.y, orbitTarget.z] : [0, 0, 0]
+      const dir: Vec3 = [
+        target[0] + (pos[0] - target[0]) * 0.8,
+        target[1] + (pos[1] - target[1]) * 0.8,
+        target[2] + (pos[2] - target[2]) * 0.8,
+      ]
+      ctrl.animateTo(dir, target, 300)
     }
   }, [])
 
@@ -1535,10 +1940,17 @@ function ViewportOverlayControls() {
       animateTo: (pos: Vec3, lookAt: Vec3, duration: number) => void
       getPosition: () => Vec3
     } | undefined
+    const orbitTarget = (globalThis as Record<string, unknown>).__orbitControlsTarget as THREE.Vector3 | undefined
     if (ctrl) {
       const pos = ctrl.getPosition()
-      const dir = [0, 0, 0].map((_, i) => pos[i] * 1.25) as Vec3
-      ctrl.animateTo(dir, [0, 0, 0], 300)
+      // Dolly away from the orbit target (or origin)
+      const target: Vec3 = orbitTarget ? [orbitTarget.x, orbitTarget.y, orbitTarget.z] : [0, 0, 0]
+      const dir: Vec3 = [
+        target[0] + (pos[0] - target[0]) * 1.25,
+        target[1] + (pos[1] - target[1]) * 1.25,
+        target[2] + (pos[2] - target[2]) * 1.25,
+      ]
+      ctrl.animateTo(dir, target, 300)
     }
   }, [])
 
@@ -1890,13 +2302,18 @@ const transformDraggingState = {
   },
 }
 
-if (typeof window !== 'undefined') {
-  ;(globalThis as Record<string, unknown>).__transformDragging = transformDraggingState
+// Lazy initialization to avoid SSR side effects
+function getTransformDraggingState() {
+  if (typeof window !== 'undefined' && !(globalThis as Record<string, unknown>).__transformDragging) {
+    ;(globalThis as Record<string, unknown>).__transformDragging = transformDraggingState
+  }
+  return transformDraggingState
 }
 
 function AnimatedOrbitControls(props: any) {
   const controlsRef = useRef<any>(null)
   const [transformDragging, setTransformDragging] = useState(false)
+  const { theme } = useExperienceStore()
 
   // Subscribe to transform-drag state
   useEffect(() => {
@@ -1910,8 +2327,8 @@ function AnimatedOrbitControls(props: any) {
       const ctrl = (globalThis as Record<string, unknown>).__cameraController as any
       const isCameraAnimating = ctrl?.isAnimating?.()
       // Disable orbit when: camera is animating, transform gizmo is dragging,
-      // or the parent component explicitly disabled it
-      controlsRef.current.enabled = !isCameraAnimating && !transformDragging && props.enabled !== false
+      // the parent component explicitly disabled it, or orbit controls are hidden via theme
+      controlsRef.current.enabled = !isCameraAnimating && !transformDragging && props.enabled !== false && theme.showOrbitControls
       // Expose the orbit controls target for annotation placement
       ;(globalThis as Record<string, unknown>).__orbitControlsTarget = controlsRef.current.target
     }
@@ -2109,6 +2526,8 @@ export function Viewport3D() {
     selectNode,
   } = useExperienceStore()
 
+  const containerRef = useRef<HTMLDivElement>(null)
+
   const viewportClickHandler = useViewportClickHandler()
 
   // Handle clicking on empty space to deselect
@@ -2119,7 +2538,7 @@ export function Viewport3D() {
   }, [isPreviewMode, isAddingHotspot, isMeasuring, deselectAll])
 
   return (
-    <div className="relative w-full h-full bg-slate-950">
+    <div ref={containerRef} className="relative w-full h-full bg-slate-950">
       <Canvas
         shadows
         gl={{
@@ -2194,6 +2613,22 @@ export function Viewport3D() {
             />
           ))}
 
+          {/* Shared 2D Hotspot Overlay (single fullscreen div) */}
+          <Hotspot2DOverlay
+            hotspots={hotspots}
+            iconColor={theme.hotspotIconColor}
+            labelStyle={theme.hotspotLabelStyle}
+            selectedHotspotId={selectedHotspotId}
+            isPreview={isPreviewMode}
+            onHotspotClick={(id: string) => {
+              if (!isPreviewMode) {
+                selectHotspot(id)
+                setSidebarTab('hotspots')
+                setPropertiesTab('hotspot')
+              }
+            }}
+          />
+
           {/* Measurement lines */}
           {measurements.length > 0 && <MeasurementLines measurements={measurements} />}
 
@@ -2204,6 +2639,7 @@ export function Viewport3D() {
           <ClickToAddHotspot />
           <MeasurementClickHandler />
           <CameraController />
+          <ProximityChecker />
           <ScreenshotCaptureHelper />
           <HotspotTransformControls />
           <ObjectTransformControls />
@@ -2266,7 +2702,7 @@ export function Viewport3D() {
       )}
 
       {/* Viewport controls overlay */}
-      <ViewportOverlayControls />
+      <ViewportOverlayControls containerRef={containerRef} />
 
       {/* Preview mode toasts */}
       {isPreviewMode && <PreviewToastDisplay />}

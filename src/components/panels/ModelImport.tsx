@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useRef, useState, useCallback, useEffect } from 'react'
+import React, { useRef, useState, useCallback } from 'react'
 import { useExperienceStore } from '@/store/experience-store'
 import {
   Upload,
@@ -18,42 +18,19 @@ export function ModelImport() {
   const [urlInput, setUrlInput] = useState('')
   const [importStatus, setImportStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
   const [errorMessage, setErrorMessage] = useState('')
-  const [prevBlobUrl, setPrevBlobUrl] = useState<string | null>(null)
-
-  // Revoke previous blob URL when model changes or component unmounts
-  useEffect(() => {
-    // If the model URL is a blob URL and it's different from prevBlobUrl, revoke the old one
-    if (prevBlobUrl && (!model || model.url !== prevBlobUrl)) {
-      URL.revokeObjectURL(prevBlobUrl)
-      setPrevBlobUrl(null)
-    }
-  }, [model, prevBlobUrl])
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      if (prevBlobUrl) {
-        URL.revokeObjectURL(prevBlobUrl)
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
 
   const handleFileUpload = useCallback(
-    async (file: File) => {
+    (file: File) => {
       setImportStatus('loading')
       setErrorMessage('')
 
-      try {
-        // Create object URL for the file
-        const url = URL.createObjectURL(file)
+      const reader = new FileReader()
+      reader.onload = () => {
+        const dataUrl = reader.result as string
         const name = file.name.replace(/\.(glb|gltf)$/, '')
 
-        // Track the blob URL for cleanup
-        setPrevBlobUrl(url)
-
         setModel({
-          url,
+          url: dataUrl,
           name,
           scale: 1,
           position: [0, 0, 0],
@@ -61,10 +38,12 @@ export function ModelImport() {
         })
         setImportStatus('success')
         setTimeout(() => setImportStatus('idle'), 3000)
-      } catch (err) {
+      }
+      reader.onerror = () => {
         setImportStatus('error')
         setErrorMessage('Failed to load model. Please ensure it is a valid GLTF/GLB file.')
       }
+      reader.readAsDataURL(file)
     },
     [setModel]
   )
@@ -139,12 +118,9 @@ export function ModelImport() {
   }, [setModel])
 
   const removeModel = useCallback(() => {
-    if (model?.url.startsWith('blob:')) {
-      URL.revokeObjectURL(model.url)
-    }
     setModel(null)
     setImportStatus('idle')
-  }, [model, setModel])
+  }, [setModel])
 
   return (
     <div className="h-full flex flex-col">

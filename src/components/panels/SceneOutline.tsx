@@ -120,26 +120,44 @@ function TreeNode({
 // ─── Helper: build SceneNode[] from Three.js scene ──────
 
 function buildSceneNodesFromThreeScene(scene: THREE.Scene): SceneNode[] {
-  const nodes: SceneNode[] = []
-  scene.traverse((obj) => {
-    // Skip the root scene, cameras, and lights (those are handled separately)
-    if (obj.type === 'Scene' || obj.type === 'Camera' || (obj as any).isLight) return
-    if (!obj.name && obj.type === 'Object3D') return // Skip unnamed groups
+  function processObject(obj: THREE.Object3D): SceneNode | null {
+    // Skip cameras, lights (handled separately), and the root scene
+    if (obj.type === 'Scene' || obj.type === 'Camera' || (obj as any).isLight) return null
+    // Skip unnamed plain Object3D groups that have no children
+    if (!obj.name && obj.type === 'Object3D' && obj.children.length === 0) return null
 
-    const nodeType = obj.type === 'Mesh' ? 'mesh' :
-                     obj.type === 'Group' || obj.type === 'Object3D' ? 'group' :
-                     obj.type === 'SkinnedMesh' ? 'mesh' : 'mesh'
+    const nodeType = obj.type === 'Mesh' || obj.type === 'SkinnedMesh' ? 'mesh' :
+                     obj.type === 'Group' || obj.type === 'Object3D' ? 'group' : 'mesh'
 
-    nodes.push({
+    // Recursively process children to preserve parent-child relationships
+    const children: SceneNode[] = []
+    for (const child of obj.children) {
+      const childNode = processObject(child)
+      if (childNode) children.push(childNode)
+    }
+
+    return {
       id: `node_${obj.name || obj.uuid.slice(0, 8)}`,
       name: obj.name || obj.type,
       type: nodeType,
       visible: obj.visible,
       selected: false,
-      children: [],
+      children: children.length > 0 ? children : undefined,
       userData: { uuid: obj.uuid, meshName: obj.name },
-    })
-  })
+    }
+  }
+
+  const nodes: SceneNode[] = []
+  for (const child of scene.children) {
+    const node = processObject(child)
+    if (!node) continue
+    // Flatten unnamed container groups — their children bubble up to the top level
+    if (!child.name && child.type !== 'Mesh' && node.children) {
+      nodes.push(...node.children)
+    } else {
+      nodes.push(node)
+    }
+  }
   return nodes
 }
 

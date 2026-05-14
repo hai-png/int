@@ -125,6 +125,15 @@ export function EditorLayout() {
   // ── Keyboard shortcuts ──────────────────────────────
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
+      // If annotation input is open, Escape should close it (even when focus is in an input)
+      if (showAnnotationInput && e.key === 'Escape') {
+        e.preventDefault()
+        setShowAnnotationInput(false)
+        setAnnotationTitle('')
+        setAnnotationContent('')
+        return
+      }
+
       // Don't capture if typing in an input
       if (
         e.target instanceof HTMLInputElement ||
@@ -213,7 +222,7 @@ export function EditorLayout() {
         }
       }
     },
-    [isPreviewMode, showGrid, showStats, isMeasuring, setPreviewMode, setAddingHotspot, setMeasuring, setShowGrid, setShowStats, undo, redo, pushHistory, addCameraBookmark, camera, showShortcutsModal, setShowShortcutsModal, autoSave, setTransformMode]
+    [isPreviewMode, showGrid, showStats, isMeasuring, showAnnotationInput, setPreviewMode, setAddingHotspot, setMeasuring, setShowGrid, setShowStats, setShowAnnotationInput, setAnnotationTitle, setAnnotationContent, undo, redo, pushHistory, addCameraBookmark, camera, showShortcutsModal, setShowShortcutsModal, autoSave, setTransformMode]
   )
 
   useEffect(() => {
@@ -249,7 +258,7 @@ export function EditorLayout() {
   // Determine what's selected for display
   const selectedHotspotId = useExperienceStore((s) => s.selectedHotspotId)
   const selectedNodeId = useExperienceStore((s) => s.selectedNodeId)
-  const selectedHotspotName = useExperienceStore((s) => s.hotspots.find((h) => h.id === s.selectedHotspotId)?.name)
+  const selectedHotspotName = useExperienceStore((s) => s.hotspots.find((h) => h.id === s.selectedHotspotId)?.name) ?? 'Unknown'
 
   // ── Format last saved time ──────────────────────────
   const lastSavedText = lastSavedAt
@@ -322,23 +331,65 @@ export function EditorLayout() {
         <ToolbarButton
           icon={<MessageCircle size={14} />}
           label="Annotate"
-          onClick={() => {
-            const id = `ann_${Date.now()}`
-            const orbitTarget = (globalThis as Record<string, unknown>).__orbitControlsTarget as THREE.Vector3 | undefined
-            const position: Vec3 = orbitTarget ? [orbitTarget.x, orbitTarget.y + 0.5, orbitTarget.z] : [0, 1, 0]
-            addAnnotation({
-              id,
-              position,
-              title: annotationTitle || 'Note',
-              content: annotationContent || 'Click to edit',
-              color: '#10b981',
-              visible: true,
-            })
-            setShowAnnotationInput(false)
-            setAnnotationTitle('')
-            setAnnotationContent('')
-          }}
+          onClick={() => setShowAnnotationInput(true)}
         />
+
+        {/* Annotation Input Dialog */}
+        {showAnnotationInput && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+            <div className="bg-slate-900 border border-white/10 rounded-xl shadow-2xl w-80 p-4 space-y-3">
+              <h3 className="text-sm font-semibold text-slate-200">Add Annotation</h3>
+              <input
+                type="text"
+                placeholder="Title (e.g. Note)"
+                value={annotationTitle}
+                onChange={(e) => setAnnotationTitle(e.target.value)}
+                className="w-full px-3 py-1.5 rounded-md bg-white/5 border border-white/10 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-emerald-500/50"
+                autoFocus
+              />
+              <textarea
+                placeholder="Content (e.g. Click to edit)"
+                value={annotationContent}
+                onChange={(e) => setAnnotationContent(e.target.value)}
+                className="w-full px-3 py-1.5 rounded-md bg-white/5 border border-white/10 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-emerald-500/50 resize-none"
+                rows={3}
+              />
+              <div className="flex justify-end gap-2">
+                <button
+                  onClick={() => {
+                    setShowAnnotationInput(false)
+                    setAnnotationTitle('')
+                    setAnnotationContent('')
+                  }}
+                  className="px-3 py-1.5 rounded-md text-xs font-medium text-slate-400 hover:text-white hover:bg-white/5 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    const id = `ann_${Date.now()}`
+                    const orbitTarget = (globalThis as Record<string, unknown>).__orbitControlsTarget as THREE.Vector3 | undefined
+                    const position: Vec3 = orbitTarget ? [orbitTarget.x, orbitTarget.y + 0.5, orbitTarget.z] : [0, 1, 0]
+                    addAnnotation({
+                      id,
+                      position,
+                      title: annotationTitle || 'Note',
+                      content: annotationContent || 'Click to edit',
+                      color: '#10b981',
+                      visible: true,
+                    })
+                    setShowAnnotationInput(false)
+                    setAnnotationTitle('')
+                    setAnnotationContent('')
+                  }}
+                  className="px-3 py-1.5 rounded-md bg-emerald-500/20 text-emerald-400 text-xs font-medium hover:bg-emerald-500/30 transition-colors"
+                >
+                  Add
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="w-px h-5 bg-white/10 mx-1" />
 

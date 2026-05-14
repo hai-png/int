@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useState, useMemo } from 'react'
 import { useExperienceStore, type Hotspot, type Behavior, type ActionDef, type TriggerType, type SceneNode, type LightConfig, type Annotation } from '@/store/experience-store'
 import {
   DndContext,
@@ -48,6 +48,46 @@ import {
   MessageCircle,
 } from 'lucide-react'
 import { HexColorPicker } from 'react-colorful'
+
+// ─── Reusable Vec3 Input ─────────────────────────────────
+
+function Vec3Input({
+  label,
+  prefixes,
+  value,
+  onChange,
+  step = 0.1,
+}: {
+  label: string
+  prefixes: [string, string, string]
+  value: [number, number, number]
+  onChange: (v: [number, number, number]) => void
+  step?: number
+}) {
+  return (
+    <div>
+      <label className="text-[9px] text-slate-500">{label}</label>
+      <div className="grid grid-cols-3 gap-1 mt-0.5">
+        {prefixes.map((prefix, i) => (
+          <div key={prefix}>
+            <div className={`text-[8px] mb-0.5 font-medium ${i === 0 ? 'text-red-400/60' : i === 1 ? 'text-green-400/60' : 'text-blue-400/60'}`}>{prefix}</div>
+            <input
+              type="number"
+              step={step}
+              value={value[i]}
+              onChange={(e) => {
+                const next: [number, number, number] = [...value]
+                next[i] = parseFloat(e.target.value) || 0
+                onChange(next)
+              }}
+              className="w-full px-1 py-0.5 text-[10px] bg-slate-700/50 border border-white/5 rounded text-slate-400 focus:outline-none focus:border-emerald-500/50"
+            />
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
 
 // ─── Action type config ───────────────────────────────────
 
@@ -804,6 +844,14 @@ function ActionFields({
   const { updateAction } = useExperienceStore()
   const [showColorPicker, setShowColorPicker] = useState(false)
 
+  // Hooks that must be called unconditionally (React rules-of-hooks)
+  const uiPanels = useExperienceStore((s) => s.uiPanels)
+  const variables = useExperienceStore((s) => s.variables)
+  const animationClips = useMemo(() => {
+    const clips = (globalThis as Record<string, unknown>).__animationClips
+    return Array.isArray(clips) ? clips as string[] : []
+  }, [])
+
   const update = (updates: Partial<ActionDef>) => {
     updateAction(hotspotId, behaviorId, action.id, updates)
   }
@@ -849,9 +897,34 @@ function ActionFields({
             >
               <option value="focusOn">Focus On</option>
               <option value="moveTo">Move To</option>
+              <option value="flyTo">Fly To</option>
               <option value="orbit">Orbit</option>
             </select>
           </div>
+          {(action.action === 'moveTo' || action.action === 'flyTo') && (
+            <>
+              <Vec3Input
+                label="Position"
+                prefixes={['PX', 'PY', 'PZ']}
+                value={action.position || [0, 0, 0]}
+                onChange={(v) => update({ position: v })}
+              />
+              <Vec3Input
+                label="Look At"
+                prefixes={['LX', 'LY', 'LZ']}
+                value={action.lookAt || [0, 0, 0]}
+                onChange={(v) => update({ lookAt: v })}
+              />
+            </>
+          )}
+          {action.action === 'orbit' && (
+            <Vec3Input
+              label="Offset"
+              prefixes={['OX', 'OY', 'OZ']}
+              value={action.offset || [0, 2, 5]}
+              onChange={(v) => update({ offset: v })}
+            />
+          )}
           {durationField}
           <div>
             <label className="text-[9px] text-slate-500">Easing</label>
@@ -873,50 +946,24 @@ function ActionFields({
       return (
         <div className="space-y-1">
           {targetField}
-          <div className="grid grid-cols-3 gap-1">
-            <div>
-              <label className="text-[9px] text-slate-500">TX</label>
-              <input
-                type="number"
-                step={0.1}
-                value={action.translate?.[0] || 0}
-                onChange={(e) => {
-                  const t: [number, number, number] = [...(action.translate || [0, 0, 0])]
-                  t[0] = parseFloat(e.target.value) || 0
-                  update({ translate: t })
-                }}
-                className="w-full px-1 py-0.5 text-[10px] bg-slate-700/50 border border-white/5 rounded text-slate-400 focus:outline-none"
-              />
-            </div>
-            <div>
-              <label className="text-[9px] text-slate-500">TY</label>
-              <input
-                type="number"
-                step={0.1}
-                value={action.translate?.[1] || 0}
-                onChange={(e) => {
-                  const t: [number, number, number] = [...(action.translate || [0, 0, 0])]
-                  t[1] = parseFloat(e.target.value) || 0
-                  update({ translate: t })
-                }}
-                className="w-full px-1 py-0.5 text-[10px] bg-slate-700/50 border border-white/5 rounded text-slate-400 focus:outline-none"
-              />
-            </div>
-            <div>
-              <label className="text-[9px] text-slate-500">TZ</label>
-              <input
-                type="number"
-                step={0.1}
-                value={action.translate?.[2] || 0}
-                onChange={(e) => {
-                  const t: [number, number, number] = [...(action.translate || [0, 0, 0])]
-                  t[2] = parseFloat(e.target.value) || 0
-                  update({ translate: t })
-                }}
-                className="w-full px-1 py-0.5 text-[10px] bg-slate-700/50 border border-white/5 rounded text-slate-400 focus:outline-none"
-              />
-            </div>
-          </div>
+          <Vec3Input
+            label="Translate"
+            prefixes={['TX', 'TY', 'TZ']}
+            value={action.translate || [0, 0, 0]}
+            onChange={(v) => update({ translate: v })}
+          />
+          <Vec3Input
+            label="Rotate"
+            prefixes={['RX', 'RY', 'RZ']}
+            value={action.rotate || [0, 0, 0]}
+            onChange={(v) => update({ rotate: v })}
+          />
+          <Vec3Input
+            label="Scale"
+            prefixes={['SX', 'SY', 'SZ']}
+            value={action.scale || [1, 1, 1]}
+            onChange={(v) => update({ scale: v })}
+          />
           {durationField}
         </div>
       )
@@ -950,6 +997,32 @@ function ActionFields({
               value={action.variantName || ''}
               onChange={(e) => update({ variantName: e.target.value })}
               placeholder="e.g. color_red"
+              className="w-full px-1.5 py-0.5 text-[10px] bg-slate-700/50 border border-white/5 rounded text-slate-400 focus:outline-none focus:border-emerald-500/50"
+            />
+          </div>
+          <div>
+            <label className="text-[9px] text-slate-500">Affects — Materials</label>
+            <input
+              type="text"
+              value={(action.affects?.materials || []).join(', ')}
+              onChange={(e) => {
+                const materials = e.target.value.split(',').map((s) => s.trim()).filter(Boolean)
+                update({ affects: { ...action.affects, materials } })
+              }}
+              placeholder="mat1, mat2, mat3"
+              className="w-full px-1.5 py-0.5 text-[10px] bg-slate-700/50 border border-white/5 rounded text-slate-400 focus:outline-none focus:border-emerald-500/50"
+            />
+          </div>
+          <div>
+            <label className="text-[9px] text-slate-500">Affects — Meshes</label>
+            <input
+              type="text"
+              value={(action.affects?.meshes || []).join(', ')}
+              onChange={(e) => {
+                const meshes = e.target.value.split(',').map((s) => s.trim()).filter(Boolean)
+                update({ affects: { ...action.affects, meshes } })
+              }}
+              placeholder="mesh1, mesh2, mesh3"
               className="w-full px-1.5 py-0.5 text-[10px] bg-slate-700/50 border border-white/5 rounded text-slate-400 focus:outline-none focus:border-emerald-500/50"
             />
           </div>
@@ -1039,21 +1112,94 @@ function ActionFields({
               className="w-full px-1.5 py-0.5 text-[10px] bg-slate-700/50 border border-white/5 rounded text-slate-400 focus:outline-none"
             />
           </div>
+          {action.action === 'changeEnvironment' && (
+            <div>
+              <label className="text-[9px] text-slate-500">HDRI</label>
+              <input
+                type="text"
+                value={action.hdri || ''}
+                onChange={(e) => update({ hdri: e.target.value })}
+                placeholder="e.g. sunset, studio, urban"
+                className="w-full px-1.5 py-0.5 text-[10px] bg-slate-700/50 border border-white/5 rounded text-slate-400 focus:outline-none focus:border-emerald-500/50"
+              />
+            </div>
+          )}
+          {action.action === 'modifyLight' && (
+            <>
+              <div>
+                <label className="text-[9px] text-slate-500">Light Name</label>
+                <input
+                  type="text"
+                  value={action.lightName || ''}
+                  onChange={(e) => update({ lightName: e.target.value })}
+                  placeholder="e.g. keyLight"
+                  className="w-full px-1.5 py-0.5 text-[10px] bg-slate-700/50 border border-white/5 rounded text-slate-400 focus:outline-none focus:border-emerald-500/50"
+                />
+              </div>
+              <div>
+                <label className="text-[9px] text-slate-500">Color</label>
+                <div className="flex items-center gap-1 mt-0.5">
+                  <div
+                    className="w-5 h-5 rounded border border-white/20 cursor-pointer flex-shrink-0"
+                    style={{ backgroundColor: action.color || '#ffffff' }}
+                    onClick={() => setShowColorPicker(!showColorPicker)}
+                  />
+                  <input
+                    type="text"
+                    value={action.color || '#ffffff'}
+                    onChange={(e) => update({ color: e.target.value })}
+                    className="flex-1 px-1.5 py-0.5 text-[10px] bg-slate-700/50 border border-white/5 rounded text-slate-400 focus:outline-none"
+                  />
+                </div>
+                {showColorPicker && (
+                  <div className="mt-1 relative">
+                    <HexColorPicker
+                      color={action.color || '#ffffff'}
+                      onChange={(color) => update({ color })}
+                    />
+                  </div>
+                )}
+              </div>
+              <div>
+                <label className="text-[9px] text-slate-500">Target</label>
+                <input
+                  type="text"
+                  value={action.target || ''}
+                  onChange={(e) => update({ target: e.target.value })}
+                  placeholder="mesh or node name"
+                  className="w-full px-1.5 py-0.5 text-[10px] bg-slate-700/50 border border-white/5 rounded text-slate-400 focus:outline-none focus:border-emerald-500/50"
+                />
+              </div>
+            </>
+          )}
         </div>
       )
 
-    case 'animation':
+    case 'animation': {
       return (
         <div className="space-y-1">
           <div>
             <label className="text-[9px] text-slate-500">Animation Name</label>
-            <input
-              type="text"
-              value={action.animationName || ''}
-              onChange={(e) => update({ animationName: e.target.value })}
-              placeholder="e.g. door_open"
-              className="w-full px-1.5 py-0.5 text-[10px] bg-slate-700/50 border border-white/5 rounded text-slate-400 focus:outline-none focus:border-emerald-500/50"
-            />
+            {animationClips.length > 0 ? (
+              <select
+                value={action.animationName || ''}
+                onChange={(e) => update({ animationName: e.target.value })}
+                className="w-full px-1.5 py-0.5 text-[10px] bg-slate-700/50 border border-white/5 rounded text-slate-400 focus:outline-none"
+              >
+                <option value="">Select animation...</option>
+                {animationClips.map((name) => (
+                  <option key={name} value={name}>{name}</option>
+                ))}
+              </select>
+            ) : (
+              <input
+                type="text"
+                value={action.animationName || ''}
+                onChange={(e) => update({ animationName: e.target.value })}
+                placeholder="e.g. door_open"
+                className="w-full px-1.5 py-0.5 text-[10px] bg-slate-700/50 border border-white/5 rounded text-slate-400 focus:outline-none focus:border-emerald-500/50"
+              />
+            )}
           </div>
           <div>
             <label className="text-[9px] text-slate-500">Action</label>
@@ -1090,10 +1236,9 @@ function ActionFields({
           </div>
         </div>
       )
+    }
 
     case 'ui': {
-      const { uiPanels } = useExperienceStore.getState()
-      const { variables } = useExperienceStore.getState()
       return (
         <div className="space-y-1">
           <div>
@@ -1111,16 +1256,26 @@ function ActionFields({
           {action.action === 'updateVariable' ? (
             <div>
               <label className="text-[9px] text-slate-500">Variable</label>
-              <select
-                value={action.variable || ''}
-                onChange={(e) => update({ variable: e.target.value })}
-                className="w-full px-1.5 py-0.5 text-[10px] bg-slate-700/50 border border-white/5 rounded text-slate-400 focus:outline-none"
-              >
-                <option value="">Select variable...</option>
-                {variables.map((v) => (
-                  <option key={v.id} value={v.name}>{v.name}</option>
-                ))}
-              </select>
+              {variables.length > 0 ? (
+                <select
+                  value={action.variable || ''}
+                  onChange={(e) => update({ variable: e.target.value })}
+                  className="w-full px-1.5 py-0.5 text-[10px] bg-slate-700/50 border border-white/5 rounded text-slate-400 focus:outline-none"
+                >
+                  <option value="">Select variable...</option>
+                  {variables.map((v) => (
+                    <option key={v.id} value={v.name}>{v.name}</option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  value={action.variable || ''}
+                  onChange={(e) => update({ variable: e.target.value })}
+                  placeholder="Variable name"
+                  className="w-full px-1.5 py-0.5 text-[10px] bg-slate-700/50 border border-white/5 rounded text-slate-400 focus:outline-none focus:border-emerald-500/50"
+                />
+              )}
             </div>
           ) : (
             <div>
