@@ -143,6 +143,9 @@ export interface SceneNode {
   children?: SceneNode[]
   visible: boolean
   selected: boolean
+  position?: Vec3
+  rotation?: Vec3
+  scale?: Vec3
   userData?: Record<string, unknown>
 }
 
@@ -287,8 +290,10 @@ export interface ExperienceState {
   setLastSavedAt: (ts: number | null) => void
   setModel: (model: ModelConfig | null) => void
   setSceneNodes: (nodes: SceneNode[]) => void
+  updateSceneNode: (id: string, updates: Partial<SceneNode>) => void
   toggleNodeVisibility: (id: string) => void
   selectNode: (id: string | null) => void
+  deselectAll: () => void
   setEnvironment: (env: Partial<EnvironmentConfig>) => void
   setCamera: (cam: Partial<CameraConfig>) => void
 
@@ -558,6 +563,12 @@ export const useExperienceStore = create<ExperienceState>()(
 
       setSceneNodes: (nodes) => set({ sceneNodes: nodes, isDirty: true }),
 
+      updateSceneNode: (id, updates) =>
+        set((s) => ({
+          sceneNodes: updateNodeInTree(s.sceneNodes, id, updates),
+          isDirty: true,
+        })),
+
       toggleNodeVisibility: (id) =>
         set((s) => ({
           sceneNodes: toggleVis(s.sceneNodes, id),
@@ -565,6 +576,8 @@ export const useExperienceStore = create<ExperienceState>()(
         })),
 
       selectNode: (id) => set({ selectedNodeId: id }),
+
+      deselectAll: () => set({ selectedNodeId: null, selectedHotspotId: null }),
 
       // ── Environment ───────────────────────────────
       setEnvironment: (env) =>
@@ -1099,7 +1112,7 @@ export const useExperienceStore = create<ExperienceState>()(
           // Check if we have a saved server project ID
           const serverId = (globalThis as Record<string, unknown>).__serverProjectId as string | undefined
           if (serverId) {
-            fetch(`/api/projects/${serverId}?XTransformPort=3000`, {
+            fetch(`/api/projects/${serverId}`, {
               method: 'PUT',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(projectData),
@@ -1107,7 +1120,7 @@ export const useExperienceStore = create<ExperienceState>()(
               // Silently fail — localStorage is the primary persistence
             })
           } else {
-            fetch('/api/projects?XTransformPort=3000', {
+            fetch('/api/projects', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(projectData),
@@ -1189,6 +1202,15 @@ function toggleVis(nodes: SceneNode[], id: string): SceneNode[] {
   return nodes.map((n) => {
     if (n.id === id) return { ...n, visible: !n.visible }
     if (n.children) return { ...n, children: toggleVis(n.children, id) }
+    return n
+  })
+}
+
+// Helper: recursively update a node in the scene tree
+function updateNodeInTree(nodes: SceneNode[], id: string, updates: Partial<SceneNode>): SceneNode[] {
+  return nodes.map((n) => {
+    if (n.id === id) return { ...n, ...updates }
+    if (n.children) return { ...n, children: updateNodeInTree(n.children, id, updates) }
     return n
   })
 }

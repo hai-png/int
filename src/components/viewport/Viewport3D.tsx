@@ -233,7 +233,7 @@ function HotspotMarker({
 
 // ─── Demo Scene (fallback when no model) ──────────────────
 
-function DemoScene() {
+function DemoScene({ onMeshClick }: { onMeshClick?: (e: ThreeEvent<MouseEvent>) => void }) {
   const groupRef = useRef<THREE.Group>(null)
   const knotRef = useRef<THREE.Mesh>(null)
   const cube1Ref = useRef<THREE.Mesh>(null)
@@ -283,39 +283,39 @@ function DemoScene() {
       </mesh>
 
       {/* Rotating torus knot */}
-      <mesh ref={knotRef} position={[0, 2.0, 0]} castShadow name="torusknot_emerald">
+      <mesh ref={knotRef} position={[0, 2.0, 0]} castShadow name="torusknot_emerald" onClick={onMeshClick}>
         <torusKnotGeometry args={[0.4, 0.12, 128, 32]} />
         <meshStandardMaterial color="#10b981" emissive="#10b981" emissiveIntensity={0.15} metalness={0.8} roughness={0.15} />
       </mesh>
 
       {/* Gold sphere */}
-      <mesh position={[1.2, 0.35, 0.8]} castShadow name="sphere_gold">
+      <mesh position={[1.2, 0.35, 0.8]} castShadow name="sphere_gold" onClick={onMeshClick}>
         <sphereGeometry args={[0.3, 32, 32]} />
         <meshStandardMaterial color="#f59e0b" metalness={0.8} roughness={0.1} />
       </mesh>
 
       {/* Red octahedron */}
-      <mesh position={[-1.2, 0.35, 0.8]} castShadow name="octahedron_red">
+      <mesh position={[-1.2, 0.35, 0.8]} castShadow name="octahedron_red" onClick={onMeshClick}>
         <octahedronGeometry args={[0.3]} />
         <meshStandardMaterial color="#ef4444" metalness={0.7} roughness={0.15} />
       </mesh>
 
       {/* Purple torus */}
-      <mesh position={[0, 0.3, -1.4]} castShadow rotation={[Math.PI / 2, 0, 0]} name="torus_purple">
+      <mesh position={[0, 0.3, -1.4]} castShadow rotation={[Math.PI / 2, 0, 0]} name="torus_purple" onClick={onMeshClick}>
         <torusGeometry args={[0.25, 0.08, 16, 32]} />
         <meshStandardMaterial color="#8b5cf6" metalness={0.7} roughness={0.15} />
       </mesh>
 
       {/* Floating animated cubes */}
-      <mesh ref={cube1Ref} position={[1.5, 2.2, -0.5]} castShadow name="cube_cyan">
+      <mesh ref={cube1Ref} position={[1.5, 2.2, -0.5]} castShadow name="cube_cyan" onClick={onMeshClick}>
         <boxGeometry args={[0.25, 0.25, 0.25]} />
         <meshStandardMaterial color="#06b6d4" emissive="#06b6d4" emissiveIntensity={0.2} metalness={0.6} roughness={0.2} />
       </mesh>
-      <mesh ref={cube2Ref} position={[-1.5, 1.8, -0.8]} castShadow name="cube_pink">
+      <mesh ref={cube2Ref} position={[-1.5, 1.8, -0.8]} castShadow name="cube_pink" onClick={onMeshClick}>
         <boxGeometry args={[0.2, 0.2, 0.2]} />
         <meshStandardMaterial color="#ec4899" emissive="#ec4899" emissiveIntensity={0.2} metalness={0.6} roughness={0.2} />
       </mesh>
-      <mesh ref={cube3Ref} position={[0.8, 2.0, 1.2]} castShadow name="cube_lime">
+      <mesh ref={cube3Ref} position={[0.8, 2.0, 1.2]} castShadow name="cube_lime" onClick={onMeshClick}>
         <boxGeometry args={[0.18, 0.18, 0.18]} />
         <meshStandardMaterial color="#84cc16" emissive="#84cc16" emissiveIntensity={0.2} metalness={0.6} roughness={0.2} />
       </mesh>
@@ -349,11 +349,12 @@ function DemoScene() {
 
 // ─── Loaded Model (with transforms applied) ───────────────
 
-function LoadedModel({ url, scale, position, rotation }: {
+function LoadedModel({ url, scale, position, rotation, onClick }: {
   url: string
   scale: number
   position: Vec3
   rotation: Vec3
+  onClick?: (e: ThreeEvent<MouseEvent>) => void
 }) {
   const { scene } = useGLTF(url)
   const cloned = useMemo(() => scene.clone(true), [scene])
@@ -365,6 +366,7 @@ function LoadedModel({ url, scale, position, rotation }: {
         scale={scale}
         position={position}
         rotation={rotation}
+        onClick={onClick}
       />
     </Center>
   )
@@ -372,17 +374,18 @@ function LoadedModel({ url, scale, position, rotation }: {
 
 // ─── Error-safe model wrapper ──────────────────────────────
 
-function SafeModelLoader({ url, scale, position, rotation }: {
+function SafeModelLoader({ url, scale, position, rotation, onClick }: {
   url: string
   scale: number
   position: Vec3
   rotation: Vec3
+  onClick?: (e: ThreeEvent<MouseEvent>) => void
 }) {
   return (
     <ErrorBoundary
       fallback={
         <group>
-          <mesh position={[0, 0.5, 0]}>
+          <mesh position={[0, 0.5, 0]} onClick={onClick}>
             <boxGeometry args={[1, 1, 1]} />
             <meshStandardMaterial color="#ef4444" wireframe />
           </mesh>
@@ -403,7 +406,7 @@ function SafeModelLoader({ url, scale, position, rotation }: {
         </group>
       }
     >
-      <LoadedModel url={url} scale={scale} position={position} rotation={rotation} />
+      <LoadedModel url={url} scale={scale} position={position} rotation={rotation} onClick={onClick} />
     </ErrorBoundary>
   )
 }
@@ -956,6 +959,8 @@ function HotspotTransformControls() {
     }
     const onDraggingChanged = (event: { value: boolean }) => {
       setIsDragging(event.value)
+      // Notify OrbitControls to disable/enable during transform drag
+      transformDraggingState.setDragging(event.value)
     }
 
     controls.addEventListener('objectChange', onObjectChange)
@@ -963,6 +968,8 @@ function HotspotTransformControls() {
     return () => {
       controls.removeEventListener('objectChange', onObjectChange)
       controls.removeEventListener('dragging-changed', onDraggingChanged)
+      // Ensure dragging state is reset when component unmounts or dependencies change
+      transformDraggingState.setDragging(false)
     }
   }, [selectedHotspotId, selectedHotspot, isPreviewMode, updateHotspot])
 
@@ -1027,7 +1034,7 @@ if (typeof window !== 'undefined') {
 // ─── Object Transform Controls (for scene nodes) ──────────
 
 function ObjectTransformControls() {
-  const { selectedNodeId, selectedHotspotId, sceneNodes, isPreviewMode } = useExperienceStore()
+  const { selectedNodeId, selectedHotspotId, sceneNodes, isPreviewMode, updateSceneNode } = useExperienceStore()
   const { scene } = useThree()
   const controlsRef = useRef<any>(null)
   const [mode, setMode] = useState<TransformMode>(transformModeState.getMode())
@@ -1078,20 +1085,40 @@ function ObjectTransformControls() {
     return found
   }, [selectedNodeId, selectedHotspotId, isPreviewMode, sceneNodes, scene])
 
-  // Listen for transform changes
+  // Listen for transform changes and sync back to store
   useEffect(() => {
     if (!controlsRef.current || !targetObject) return
     const controls = controlsRef.current
+    // Store targetObject in a local variable to avoid TS narrowing issues in the closure
+    const obj = targetObject
+
+    const onObjectChange = () => {
+      if (obj && selectedNodeId) {
+        const pos = obj.position
+        const rot = obj.rotation
+        const scl = obj.scale
+        updateSceneNode(selectedNodeId, {
+          position: [pos.x, pos.y, pos.z] as Vec3,
+          rotation: [rot.x, rot.y, rot.z] as Vec3,
+          scale: [scl.x, scl.y, scl.z] as Vec3,
+        })
+      }
+    }
 
     const onDraggingChanged = (event: { value: boolean }) => {
       setIsDragging(event.value)
+      // Notify OrbitControls to disable/enable during transform drag
+      transformDraggingState.setDragging(event.value)
     }
 
+    controls.addEventListener('objectChange', onObjectChange)
     controls.addEventListener('dragging-changed', onDraggingChanged)
     return () => {
+      controls.removeEventListener('objectChange', onObjectChange)
       controls.removeEventListener('dragging-changed', onDraggingChanged)
+      transformDraggingState.setDragging(false)
     }
-  }, [targetObject])
+  }, [targetObject, selectedNodeId, updateSceneNode])
 
   if (!targetObject) return null
 
@@ -1843,13 +1870,48 @@ function SceneStatsOverlay() {
 
 // ─── Animated OrbitControls (disables during camera animation) ──
 
+// Track whether a transform gizmo is being dragged so OrbitControls can be
+// disabled during the drag. drei's TransformControls normally disables
+// OrbitControls automatically, but our wrapper was overriding `enabled` every
+// frame, re-enabling orbit mid-drag.
+const transformDraggingState = {
+  isDragging: false,
+  listeners: new Set<() => void>(),
+  setDragging(v: boolean) {
+    transformDraggingState.isDragging = v
+    transformDraggingState.listeners.forEach((l) => l())
+  },
+  getDragging(): boolean {
+    return transformDraggingState.isDragging
+  },
+  subscribe(listener: () => void) {
+    transformDraggingState.listeners.add(listener)
+    return () => { transformDraggingState.listeners.delete(listener) }
+  },
+}
+
+if (typeof window !== 'undefined') {
+  ;(globalThis as Record<string, unknown>).__transformDragging = transformDraggingState
+}
+
 function AnimatedOrbitControls(props: any) {
   const controlsRef = useRef<any>(null)
+  const [transformDragging, setTransformDragging] = useState(false)
+
+  // Subscribe to transform-drag state
+  useEffect(() => {
+    return transformDraggingState.subscribe(() => {
+      setTransformDragging(transformDraggingState.getDragging())
+    })
+  }, [])
 
   useFrame(() => {
     if (controlsRef.current) {
       const ctrl = (globalThis as Record<string, unknown>).__cameraController as any
-      controlsRef.current.enabled = !ctrl?.isAnimating?.() && props.enabled !== false
+      const isCameraAnimating = ctrl?.isAnimating?.()
+      // Disable orbit when: camera is animating, transform gizmo is dragging,
+      // or the parent component explicitly disabled it
+      controlsRef.current.enabled = !isCameraAnimating && !transformDragging && props.enabled !== false
       // Expose the orbit controls target for annotation placement
       ;(globalThis as Record<string, unknown>).__orbitControlsTarget = controlsRef.current.target
     }
@@ -1956,6 +2018,71 @@ function AnimationMixerHelper() {
   return null
 }
 
+// ─── Viewport Click-to-Select Hook ────────────────────────
+// Returns an onClick handler that maps clicked 3D objects to scene nodes.
+
+function useViewportClickHandler() {
+  const { sceneNodes, selectNode, selectHotspot, setSidebarTab, setPropertiesTab, isPreviewMode, isAddingHotspot, isMeasuring } = useExperienceStore()
+
+  // Build reverse mapping: mesh name → scene node ID
+  const meshToNodeId = useMemo(() => {
+    const map: Record<string, string> = {}
+    // Demo scene mappings
+    for (const [nodeId, meshName] of Object.entries(demoNodeToMeshName)) {
+      map[meshName] = nodeId
+    }
+    // Walk sceneNodes for user model mappings
+    function walkNodes(nodes: SceneNode[]) {
+      for (const n of nodes) {
+        if (n.name) map[n.name] = n.id
+        if (n.userData?.meshName) map[n.userData.meshName as string] = n.id
+        if (n.children) walkNodes(n.children)
+      }
+    }
+    walkNodes(sceneNodes)
+    return map
+  }, [sceneNodes])
+
+  return useCallback((e: ThreeEvent<MouseEvent>) => {
+    if (isPreviewMode || isAddingHotspot || isMeasuring) return
+    e.stopPropagation()
+
+    const clickedObj = e.object
+    if (!clickedObj) return
+
+    // Try to find a matching scene node by walking up the object hierarchy
+    let current: THREE.Object3D | null = clickedObj
+    let matchedNodeId: string | null = null
+
+    while (current) {
+      if (current.name && current.name in meshToNodeId) {
+        matchedNodeId = meshToNodeId[current.name]
+        break
+      }
+      current = current.parent
+    }
+
+    if (matchedNodeId) {
+      selectNode(matchedNodeId)
+      selectHotspot(null)
+      setSidebarTab('scene')
+      setPropertiesTab('hotspot')
+    }
+  }, [isPreviewMode, isAddingHotspot, isMeasuring, meshToNodeId, selectNode, selectHotspot, setSidebarTab, setPropertiesTab])
+}
+
+// Helper to find a scene node by matching a Three.js object UUID
+function findNodeByUuid(nodes: SceneNode[], uuid: string): string | null {
+  for (const n of nodes) {
+    if (n.userData?.uuid === uuid) return n.id
+    if (n.children) {
+      const found = findNodeByUuid(n.children, uuid)
+      if (found) return found
+    }
+  }
+  return null
+}
+
 // ─── Main Viewport ────────────────────────────────────────
 
 export function Viewport3D() {
@@ -1977,7 +2104,19 @@ export function Viewport3D() {
     measurements,
     annotations,
     lights,
+    deselectAll,
+    sceneNodes,
+    selectNode,
   } = useExperienceStore()
+
+  const viewportClickHandler = useViewportClickHandler()
+
+  // Handle clicking on empty space to deselect
+  const handlePointerMissed = useCallback(() => {
+    if (!isPreviewMode && !isAddingHotspot && !isMeasuring) {
+      deselectAll()
+    }
+  }, [isPreviewMode, isAddingHotspot, isMeasuring, deselectAll])
 
   return (
     <div className="relative w-full h-full bg-slate-950">
@@ -1998,6 +2137,7 @@ export function Viewport3D() {
           near: camConfig.near,
           far: camConfig.far,
         }}
+        onPointerMissed={handlePointerMissed}
       >
         <Suspense fallback={null}>
           {/* Lighting */}
@@ -2027,9 +2167,10 @@ export function Viewport3D() {
               scale={model.scale}
               position={model.position}
               rotation={model.rotation}
+              onClick={viewportClickHandler}
             />
           ) : (
-            <DemoScene />
+            <DemoScene onMeshClick={viewportClickHandler} />
           )}
 
           <ContactShadows position={[0, -0.01, 0]} opacity={0.4} scale={10} blur={2} far={4} />

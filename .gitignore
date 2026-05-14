@@ -50,9 +50,10 @@ Thumbs.db
 prisma/*.db
 prisma/*.db-journal
 
-# Bun
-bun.lock
-
 # Agent context
 agent-ctx/
 .zscripts/
+
+# Development artifacts
+worklog.md
+download/

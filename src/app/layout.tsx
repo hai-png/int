@@ -19,12 +19,11 @@ export const metadata: Metadata = {
   keywords: ["3D", "GLTF", "Interactive", "Experience Builder", "React Three Fiber", "Hotspots", "No-code"],
   authors: [{ name: "3D Experience Builder" }],
   icons: {
-    icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
+    icon: "/logo.svg",
   },
   openGraph: {
     title: "3D Experience Builder",
     description: "Transform GLTF models into interactive 3D experiences",
-    url: "https://chat.z.ai",
     siteName: "3D Experience Builder",
     type: "website",
   },
