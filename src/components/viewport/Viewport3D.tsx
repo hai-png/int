@@ -425,8 +425,22 @@ function LoadedModel({ url, scale, position, rotation, onClick }: {
   rotation: Vec3
   onClick?: (e: ThreeEvent<MouseEvent>) => void
 }) {
-  const { scene } = useGLTF(url)
+  const { scene, animations } = useGLTF(url)
   const clonedScene = useMemo(() => scene.clone(true), [scene])
+
+  // Convert rotation from degrees (UI) to radians (Three.js)
+  const rotationRad = useMemo(() => [
+    rotation[0] * Math.PI / 180,
+    rotation[1] * Math.PI / 180,
+    rotation[2] * Math.PI / 180,
+  ] as [number, number, number], [rotation])
+
+  // Expose animation clip names for PropertiesPanel
+  useEffect(() => {
+    if (animations.length > 0) {
+      ;(globalThis as Record<string, unknown>).__animationClips = animations.map(a => a.name)
+    }
+  }, [animations])
 
   // Dispose the cloned scene when it's replaced or on unmount
   useEffect(() => {
@@ -449,7 +463,7 @@ function LoadedModel({ url, scale, position, rotation, onClick }: {
         object={clonedScene}
         scale={scale}
         position={position}
-        rotation={rotation}
+        rotation={rotationRad}
         onClick={onClick}
       />
     </Center>
