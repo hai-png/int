@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState } from 'react'
-import { useExperienceStore, type SceneConfig } from '@/store/experience-store'
+import { useExperienceStore, type SceneConfig, defaultLights } from '@/store/experience-store'
 import {
   Plus,
   Trash2,
@@ -37,6 +37,9 @@ export function SceneManager() {
       hotspots: [],
       environment: { type: 'hdri', preset: 'studio', intensity: 1.0 },
       cameraBookmarks: [],
+      lights: defaultLights,
+      annotations: [],
+      sceneNodes: [],
     })
   }
 

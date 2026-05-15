@@ -187,6 +187,25 @@ export function ModelImport() {
                   ))}
                 </div>
               </div>
+              <div className="space-y-1">
+                <label className="text-[9px] text-slate-500">Rotation (degrees)</label>
+                <div className="grid grid-cols-3 gap-1">
+                  {['X', 'Y', 'Z'].map((axis, i) => (
+                    <input
+                      key={axis}
+                      type="number"
+                      value={model.rotation?.[i] ?? 0}
+                      onChange={(e) => {
+                        const newRot: [number, number, number] = [...(model.rotation || [0, 0, 0])]
+                        newRot[i] = parseFloat(e.target.value) || 0
+                        setModel({ ...model, rotation: newRot })
+                      }}
+                      className="w-full px-1.5 py-1 text-xs bg-slate-800 border border-white/10 rounded text-slate-300 text-center"
+                      step={1}
+                    />
+                  ))}
+                </div>
+              </div>
             </div>
           </div>
         ) : (

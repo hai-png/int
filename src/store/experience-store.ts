@@ -195,6 +195,9 @@ export interface SceneConfig {
   hotspots: Hotspot[]
   environment: EnvironmentConfig
   cameraBookmarks: CameraBookmark[]
+  lights: LightConfig[]
+  annotations: Annotation[]
+  sceneNodes: SceneNode[]
 }
 
 // ─── Measurement ─────────────────────────────────────────
@@ -416,7 +419,7 @@ const defaultPostProcessing: PostProcessingConfig = {
   ssrIntensity: 0.5,
 }
 
-const defaultLights: LightConfig[] = [
+export const defaultLights: LightConfig[] = [
   { id: 'light_ambient', name: 'Ambient', type: 'ambient', color: '#ffffff', intensity: 0.3, position: [0, 0, 0], castShadow: false },
   { id: 'light_directional', name: 'Directional', type: 'directional', color: '#ffffff', intensity: 1.2, position: [5, 8, 5], castShadow: true },
   { id: 'light_spot', name: 'Spot', type: 'spot', color: '#ffffff', intensity: 0.5, position: [-5, 5, -5], castShadow: false, angle: 0.5, penumbra: 1 },
@@ -438,7 +441,7 @@ const defaultTheme: ThemeConfig = {
   postProcessing: defaultPostProcessing,
 }
 
-const defaultEnvironment: EnvironmentConfig = {
+export const defaultEnvironment: EnvironmentConfig = {
   type: 'hdri',
   preset: 'studio',
   intensity: 1.0,
@@ -496,6 +499,34 @@ const uid = () => `id_${Date.now()}_${++counter}`
 
 const defaultSceneId = uid()
 
+// Debounced auto-push history for undo/redo
+let historyDebounceTimer: ReturnType<typeof setTimeout> | null = null
+const autoPushHistory = (get: () => ExperienceState, set: (partial: Partial<ExperienceState>) => void) => {
+  if (historyDebounceTimer) clearTimeout(historyDebounceTimer)
+  historyDebounceTimer = setTimeout(() => {
+    const s = get()
+    const snapshot = {
+      hotspots: JSON.parse(JSON.stringify(s.hotspots)),
+      uiPanels: JSON.parse(JSON.stringify(s.uiPanels)),
+      variables: JSON.parse(JSON.stringify(s.variables)),
+      theme: JSON.parse(JSON.stringify(s.theme)),
+      environment: JSON.parse(JSON.stringify(s.environment)),
+      camera: JSON.parse(JSON.stringify(s.camera)),
+      model: s.model ? JSON.parse(JSON.stringify(s.model)) : null,
+      sceneNodes: JSON.parse(JSON.stringify(s.sceneNodes)),
+      lights: JSON.parse(JSON.stringify(s.lights)),
+      scenes: JSON.parse(JSON.stringify(s.scenes)),
+      activeSceneId: s.activeSceneId,
+      measurements: JSON.parse(JSON.stringify(s.measurements)),
+      annotations: JSON.parse(JSON.stringify(s.annotations)),
+    }
+    const newHistory = s.history.slice(0, s.historyIndex + 1)
+    newHistory.push(snapshot)
+    if (newHistory.length > 50) newHistory.shift()
+    set({ history: newHistory, historyIndex: newHistory.length - 1 })
+  }, 500)
+}
+
 export const useExperienceStore = create<ExperienceState>()(
   persist(
     (set, get) => ({
@@ -538,7 +569,7 @@ export const useExperienceStore = create<ExperienceState>()(
       historyIndex: -1,
 
       // Multi-Scene
-      scenes: [{ id: defaultSceneId, name: 'Scene 1', model: null, hotspots: [], environment: defaultEnvironment, cameraBookmarks: [] }],
+      scenes: [{ id: defaultSceneId, name: 'Scene 1', model: null, hotspots: [], environment: defaultEnvironment, cameraBookmarks: [], lights: defaultLights, annotations: [], sceneNodes: [] }],
       activeSceneId: defaultSceneId,
 
       // Measurement
@@ -558,65 +589,88 @@ export const useExperienceStore = create<ExperienceState>()(
       serverProjectId: null,
 
       // ── Project ───────────────────────────────────
-      setProjectName: (name) => set({ projectName: name, isDirty: true }),
+      setProjectName: (name) => {
+        autoPushHistory(get, set)
+        set({ projectName: name, isDirty: true })
+      },
 
       setHasSeenWelcome: (seen) => set({ hasSeenWelcome: seen }),
 
       setLastSavedAt: (ts) => set({ lastSavedAt: ts }),
 
       // ── Model ─────────────────────────────────────
-      setModel: (model) => set({ model, isDirty: true }),
+      setModel: (model) => {
+        autoPushHistory(get, set)
+        set({ model, isDirty: true })
+      },
 
-      setSceneNodes: (nodes) => set({ sceneNodes: nodes, isDirty: true }),
+      setSceneNodes: (nodes) => {
+        autoPushHistory(get, set)
+        set({ sceneNodes: nodes, isDirty: true })
+      },
 
-      updateSceneNode: (id, updates) =>
+      updateSceneNode: (id, updates) => {
+        autoPushHistory(get, set)
         set((s) => ({
           sceneNodes: updateNodeInTree(s.sceneNodes, id, updates),
           isDirty: true,
-        })),
+        }))
+      },
 
-      toggleNodeVisibility: (id) =>
+      toggleNodeVisibility: (id) => {
+        autoPushHistory(get, set)
         set((s) => ({
           sceneNodes: toggleVis(s.sceneNodes, id),
           isDirty: true,
-        })),
+        }))
+      },
 
       selectNode: (id) => set({ selectedNodeId: id }),
 
       deselectAll: () => set({ selectedNodeId: null, selectedHotspotId: null }),
 
       // ── Environment ───────────────────────────────
-      setEnvironment: (env) =>
+      setEnvironment: (env) => {
+        autoPushHistory(get, set)
         set((s) => ({
           environment: { ...s.environment, ...env },
           isDirty: true,
-        })),
+        }))
+      },
 
       // ── Camera ────────────────────────────────────
-      setCamera: (cam) =>
-        set((s) => ({ camera: { ...s.camera, ...cam }, isDirty: true })),
+      setCamera: (cam) => {
+        autoPushHistory(get, set)
+        set((s) => ({ camera: { ...s.camera, ...cam }, isDirty: true }))
+      },
 
       // ── Hotspots ──────────────────────────────────
-      addHotspot: (hotspot) =>
+      addHotspot: (hotspot) => {
+        autoPushHistory(get, set)
         set((s) => ({
           hotspots: [...s.hotspots, hotspot],
           isDirty: true,
-        })),
+        }))
+      },
 
-      updateHotspot: (id, updates) =>
+      updateHotspot: (id, updates) => {
+        autoPushHistory(get, set)
         set((s) => ({
           hotspots: s.hotspots.map((h) =>
             h.id === id ? { ...h, ...updates } : h
           ),
           isDirty: true,
-        })),
+        }))
+      },
 
-      removeHotspot: (id) =>
+      removeHotspot: (id) => {
+        autoPushHistory(get, set)
         set((s) => ({
           hotspots: s.hotspots.filter((h) => h.id !== id),
           selectedHotspotId: s.selectedHotspotId === id ? null : s.selectedHotspotId,
           isDirty: true,
-        })),
+        }))
+      },
 
       selectHotspot: (id) => set({ selectedHotspotId: id }),
 
@@ -624,7 +678,8 @@ export const useExperienceStore = create<ExperienceState>()(
         set({ isAddingHotspot: adding, addingHotspotType: type }),
 
       // ── Behaviors ─────────────────────────────────
-      addBehavior: (hotspotId, behavior) =>
+      addBehavior: (hotspotId, behavior) => {
+        autoPushHistory(get, set)
         set((s) => ({
           hotspots: s.hotspots.map((h) =>
             h.id === hotspotId
@@ -632,9 +687,11 @@ export const useExperienceStore = create<ExperienceState>()(
               : h
           ),
           isDirty: true,
-        })),
+        }))
+      },
 
-      updateBehavior: (hotspotId, behaviorId, updates) =>
+      updateBehavior: (hotspotId, behaviorId, updates) => {
+        autoPushHistory(get, set)
         set((s) => ({
           hotspots: s.hotspots.map((h) =>
             h.id === hotspotId
@@ -647,9 +704,11 @@ export const useExperienceStore = create<ExperienceState>()(
               : h
           ),
           isDirty: true,
-        })),
+        }))
+      },
 
-      removeBehavior: (hotspotId, behaviorId) =>
+      removeBehavior: (hotspotId, behaviorId) => {
+        autoPushHistory(get, set)
         set((s) => ({
           hotspots: s.hotspots.map((h) =>
             h.id === hotspotId
@@ -657,9 +716,11 @@ export const useExperienceStore = create<ExperienceState>()(
               : h
           ),
           isDirty: true,
-        })),
+        }))
+      },
 
-      reorderBehaviors: (hotspotId, behaviorIds) =>
+      reorderBehaviors: (hotspotId, behaviorIds) => {
+        autoPushHistory(get, set)
         set((s) => ({
           hotspots: s.hotspots.map((h) => {
             if (h.id !== hotspotId) return h
@@ -669,9 +730,11 @@ export const useExperienceStore = create<ExperienceState>()(
             return { ...h, behaviors: reordered }
           }),
           isDirty: true,
-        })),
+        }))
+      },
 
-      addAction: (hotspotId, behaviorId, action) =>
+      addAction: (hotspotId, behaviorId, action) => {
+        autoPushHistory(get, set)
         set((s) => ({
           hotspots: s.hotspots.map((h) =>
             h.id === hotspotId
@@ -686,9 +749,11 @@ export const useExperienceStore = create<ExperienceState>()(
               : h
           ),
           isDirty: true,
-        })),
+        }))
+      },
 
-      updateAction: (hotspotId, behaviorId, actionId, updates) =>
+      updateAction: (hotspotId, behaviorId, actionId, updates) => {
+        autoPushHistory(get, set)
         set((s) => ({
           hotspots: s.hotspots.map((h) =>
             h.id === hotspotId
@@ -708,9 +773,11 @@ export const useExperienceStore = create<ExperienceState>()(
               : h
           ),
           isDirty: true,
-        })),
+        }))
+      },
 
-      removeAction: (hotspotId, behaviorId, actionId) =>
+      removeAction: (hotspotId, behaviorId, actionId) => {
+        autoPushHistory(get, set)
         set((s) => ({
           hotspots: s.hotspots.map((h) =>
             h.id === hotspotId
@@ -728,9 +795,11 @@ export const useExperienceStore = create<ExperienceState>()(
               : h
           ),
           isDirty: true,
-        })),
+        }))
+      },
 
-      reorderActions: (hotspotId, behaviorId, actionIds) =>
+      reorderActions: (hotspotId, behaviorId, actionIds) => {
+        autoPushHistory(get, set)
         set((s) => ({
           hotspots: s.hotspots.map((h) => {
             if (h.id !== hotspotId) return h
@@ -746,46 +815,60 @@ export const useExperienceStore = create<ExperienceState>()(
             }
           }),
           isDirty: true,
-        })),
+        }))
+      },
 
       // ── UI Panels ─────────────────────────────────
-      addUIPanel: (panel) =>
-        set((s) => ({ uiPanels: [...s.uiPanels, panel], isDirty: true })),
+      addUIPanel: (panel) => {
+        autoPushHistory(get, set)
+        set((s) => ({ uiPanels: [...s.uiPanels, panel], isDirty: true }))
+      },
 
-      updateUIPanel: (id, updates) =>
+      updateUIPanel: (id, updates) => {
+        autoPushHistory(get, set)
         set((s) => ({
           uiPanels: s.uiPanels.map((p) =>
             p.id === id ? { ...p, ...updates } : p
           ),
           isDirty: true,
-        })),
+        }))
+      },
 
-      removeUIPanel: (id) =>
+      removeUIPanel: (id) => {
+        autoPushHistory(get, set)
         set((s) => ({
           uiPanels: s.uiPanels.filter((p) => p.id !== id),
           isDirty: true,
-        })),
+        }))
+      },
 
       // ── Variables ─────────────────────────────────
-      addVariable: (variable) =>
-        set((s) => ({ variables: [...s.variables, variable], isDirty: true })),
+      addVariable: (variable) => {
+        autoPushHistory(get, set)
+        set((s) => ({ variables: [...s.variables, variable], isDirty: true }))
+      },
 
-      updateVariable: (id, updates) =>
+      updateVariable: (id, updates) => {
+        autoPushHistory(get, set)
         set((s) => ({
           variables: s.variables.map((v) =>
             v.id === id ? { ...v, ...updates } : v
           ),
           isDirty: true,
-        })),
+        }))
+      },
 
-      removeVariable: (id) =>
+      removeVariable: (id) => {
+        autoPushHistory(get, set)
         set((s) => ({
           variables: s.variables.filter((v) => v.id !== id),
           isDirty: true,
-        })),
+        }))
+      },
 
       // ── Theme ─────────────────────────────────────
-      setTheme: (theme) =>
+      setTheme: (theme) => {
+        autoPushHistory(get, set)
         set((s) => ({
           theme: {
             ...s.theme,
@@ -796,9 +879,11 @@ export const useExperienceStore = create<ExperienceState>()(
             },
           },
           isDirty: true,
-        })),
+        }))
+      },
 
-      applySkinPreset: (preset) =>
+      applySkinPreset: (preset) => {
+        autoPushHistory(get, set)
         set((s) => ({
           theme: {
             ...s.theme,
@@ -807,7 +892,8 @@ export const useExperienceStore = create<ExperienceState>()(
             postProcessing: s.theme.postProcessing || defaultPostProcessing,
           },
           isDirty: true,
-        })),
+        }))
+      },
 
       // ── Editor ────────────────────────────────────
       setPreviewMode: (preview) => set({ isPreviewMode: preview, activePreviewPanel: null, previewToasts: [] }),
@@ -827,11 +913,15 @@ export const useExperienceStore = create<ExperienceState>()(
       setShowGrid: (show) => set({ showGrid: show }),
 
       // ── Camera Bookmarks ─────────────────────────
-      addCameraBookmark: (bookmark) =>
-        set((s) => ({ cameraBookmarks: [...s.cameraBookmarks, bookmark], isDirty: true })),
+      addCameraBookmark: (bookmark) => {
+        autoPushHistory(get, set)
+        set((s) => ({ cameraBookmarks: [...s.cameraBookmarks, bookmark], isDirty: true }))
+      },
 
-      removeCameraBookmark: (id) =>
-        set((s) => ({ cameraBookmarks: s.cameraBookmarks.filter((b) => b.id !== id), isDirty: true })),
+      removeCameraBookmark: (id) => {
+        autoPushHistory(get, set)
+        set((s) => ({ cameraBookmarks: s.cameraBookmarks.filter((b) => b.id !== id), isDirty: true }))
+      },
 
       // ── History (Undo/Redo) ──────────────────────
       pushHistory: () => {
@@ -956,7 +1046,7 @@ export const useExperienceStore = create<ExperienceState>()(
           uiPanels: (data.uiPanels as UIPanel[]) || [],
           variables: (data.variables as Variable[]) || [],
           theme: mergedTheme,
-          scenes: (data.scenes as SceneConfig[]) || [{ id: uid(), name: 'Scene 1', model: null, hotspots: [], environment: defaultEnvironment, cameraBookmarks: [] }],
+          scenes: (data.scenes as SceneConfig[]) || [{ id: uid(), name: 'Scene 1', model: null, hotspots: [], environment: defaultEnvironment, cameraBookmarks: [], lights: defaultLights, annotations: [], sceneNodes: [] }],
           activeSceneId: (data.activeSceneId as string) || '',
           measurements: (data.measurements as Measurement[]) || [],
           lights: (data.lights as LightConfig[]) || defaultLights,
@@ -1002,7 +1092,7 @@ export const useExperienceStore = create<ExperienceState>()(
           previewToasts: [],
           history: [],
           historyIndex: -1,
-          scenes: [{ id: newSceneId, name: 'Scene 1', model: null, hotspots: [], environment: defaultEnvironment, cameraBookmarks: [] }],
+          scenes: [{ id: newSceneId, name: 'Scene 1', model: null, hotspots: [], environment: defaultEnvironment, cameraBookmarks: [], lights: defaultLights, annotations: [], sceneNodes: [] }],
           activeSceneId: newSceneId,
           isMeasuring: false,
           measurements: [],
@@ -1015,28 +1105,31 @@ export const useExperienceStore = create<ExperienceState>()(
       },
 
       // ── Multi-Scene ───────────────────────────────
-      addScene: (scene) =>
-        set((s) => ({ scenes: [...s.scenes, scene], isDirty: true })),
+      addScene: (scene) => {
+        autoPushHistory(get, set)
+        set((s) => ({ scenes: [...s.scenes, scene], isDirty: true }))
+      },
 
-      removeScene: (id) =>
+      removeScene: (id) => {
+        autoPushHistory(get, set)
         set((s) => {
           if (s.scenes.length <= 1) return s // Don't remove last scene
           const newScenes = s.scenes.filter((sc) => sc.id !== id)
           const newActiveId = s.activeSceneId === id ? newScenes[0]?.id || '' : s.activeSceneId
           return { scenes: newScenes, activeSceneId: newActiveId, isDirty: true }
-        }),
+        })
+      },
 
-      switchScene: (id) =>
+      switchScene: (id) => {
+        autoPushHistory(get, set)
         set((s) => {
           const scene = s.scenes.find((sc) => sc.id === id)
           if (!scene) return s
-          // Save current scene state first (including lights, annotations, sceneNodes)
           const updatedScenes = s.scenes.map((sc) =>
             sc.id === s.activeSceneId
-              ? { ...sc, model: s.model, hotspots: s.hotspots, environment: s.environment, cameraBookmarks: s.cameraBookmarks }
+              ? { ...sc, model: s.model, hotspots: s.hotspots, environment: s.environment, cameraBookmarks: s.cameraBookmarks, lights: s.lights, annotations: s.annotations, sceneNodes: s.sceneNodes }
               : sc
           )
-          // Load the target scene
           const targetScene = updatedScenes.find((sc) => sc.id === id)
           return {
             scenes: updatedScenes,
@@ -1045,49 +1138,68 @@ export const useExperienceStore = create<ExperienceState>()(
             hotspots: targetScene?.hotspots || [],
             environment: targetScene?.environment || defaultEnvironment,
             cameraBookmarks: targetScene?.cameraBookmarks || [],
+            lights: targetScene?.lights || defaultLights,
+            annotations: targetScene?.annotations || [],
+            sceneNodes: targetScene?.sceneNodes || [],
             selectedHotspotId: null,
             isDirty: true,
           }
-        }),
+        })
+      },
 
-      updateScene: (id, updates) =>
+      updateScene: (id, updates) => {
+        autoPushHistory(get, set)
         set((s) => ({
           scenes: s.scenes.map((sc) =>
             sc.id === id ? { ...sc, ...updates } : sc
           ),
           isDirty: true,
-        })),
+        }))
+      },
 
       // ── Measurement ───────────────────────────────
       setMeasuring: (v) => set({ isMeasuring: v }),
 
-      addMeasurement: (m) =>
-        set((s) => ({ measurements: [...s.measurements, m], isDirty: true })),
+      addMeasurement: (m) => {
+        autoPushHistory(get, set)
+        set((s) => ({ measurements: [...s.measurements, m], isDirty: true }))
+      },
 
-      removeMeasurement: (id) =>
+      removeMeasurement: (id) => {
+        autoPushHistory(get, set)
         set((s) => ({
           measurements: s.measurements.filter((m) => m.id !== id),
           isDirty: true,
-        })),
+        }))
+      },
 
-      clearMeasurements: () =>
-        set({ measurements: [], isDirty: true }),
+      clearMeasurements: () => {
+        autoPushHistory(get, set)
+        set({ measurements: [], isDirty: true })
+      },
 
       // ── Lights ─────────────────────────────────────
-      addLight: (light) =>
-        set((s) => ({ lights: [...s.lights, light], isDirty: true })),
+      addLight: (light) => {
+        autoPushHistory(get, set)
+        set((s) => ({ lights: [...s.lights, light], isDirty: true }))
+      },
 
-      updateLight: (id, updates) =>
+      updateLight: (id, updates) => {
+        autoPushHistory(get, set)
         set((s) => ({
           lights: s.lights.map((l) => l.id === id ? { ...l, ...updates } : l),
           isDirty: true,
-        })),
+        }))
+      },
 
-      removeLight: (id) =>
-        set((s) => ({ lights: s.lights.filter((l) => l.id !== id), isDirty: true })),
+      removeLight: (id) => {
+        autoPushHistory(get, set)
+        set((s) => ({ lights: s.lights.filter((l) => l.id !== id), isDirty: true }))
+      },
 
       // ── Duplicate Hotspot ─────────────────────────
-      duplicateHotspot: (id) =>
+      duplicateHotspot: (id) => {
+        autoPushHistory(get, set)
         set((s) => {
           const h = s.hotspots.find((hs) => hs.id === id)
           if (!h) return s
@@ -1102,28 +1214,35 @@ export const useExperienceStore = create<ExperienceState>()(
             selectedHotspotId: newId,
             isDirty: true,
           }
-        }),
+        })
+      },
 
       // ── Stats & Shortcuts ─────────────────────────
       setShowStats: (v) => set({ showStats: v }),
       setShowShortcutsModal: (v) => set({ showShortcutsModal: v }),
 
       // ── Annotations ───────────────────────────────
-      addAnnotation: (a) =>
-        set((s) => ({ annotations: [...s.annotations, a], isDirty: true })),
+      addAnnotation: (a) => {
+        autoPushHistory(get, set)
+        set((s) => ({ annotations: [...s.annotations, a], isDirty: true }))
+      },
 
-      updateAnnotation: (id, updates) =>
+      updateAnnotation: (id, updates) => {
+        autoPushHistory(get, set)
         set((s) => ({
           annotations: s.annotations.map((a) => a.id === id ? { ...a, ...updates } : a),
           isDirty: true,
-        })),
+        }))
+      },
 
-      removeAnnotation: (id) =>
+      removeAnnotation: (id) => {
+        autoPushHistory(get, set)
         set((s) => ({
           annotations: s.annotations.filter((a) => a.id !== id),
           selectedAnnotationId: s.selectedAnnotationId === id ? null : s.selectedAnnotationId,
           isDirty: true,
-        })),
+        }))
+      },
 
       selectAnnotation: (id) => set({ selectedAnnotationId: id }),
 
@@ -1203,7 +1322,10 @@ export const useExperienceStore = create<ExperienceState>()(
         projectName: state.projectName,
         hasSeenWelcome: state.hasSeenWelcome,
         lastSavedAt: state.lastSavedAt,
-        model: state.model,
+        model: state.model ? {
+          ...state.model,
+          url: state.model.url.startsWith('data:') ? '' : state.model.url,
+        } : null,
         sceneNodes: state.sceneNodes,
         environment: state.environment,
         camera: state.camera,

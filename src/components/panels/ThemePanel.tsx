@@ -174,6 +174,23 @@ export function ThemePanel() {
           )}
         </div>
 
+        {/* Typography */}
+        <div className="px-3 py-3 border-b border-white/5 space-y-2">
+          <label className="text-[10px] text-slate-500 uppercase tracking-wider block">
+            Typography
+          </label>
+          <div>
+            <label className="text-[9px] text-slate-500">Font Family</label>
+            <input
+              type="text"
+              value={theme.fontFamily || ''}
+              onChange={(e) => setTheme({ fontFamily: e.target.value })}
+              placeholder="e.g. Inter, sans-serif"
+              className="w-full mt-0.5 px-2 py-1 text-xs bg-slate-800 border border-white/10 rounded text-slate-300 focus:outline-none focus:border-emerald-500"
+            />
+          </div>
+        </div>
+
         {/* Hotspot Style */}
         <div className="px-3 py-3 border-b border-white/5 space-y-2">
           <label className="text-[10px] text-slate-500 uppercase tracking-wider block">

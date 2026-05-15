@@ -277,7 +277,7 @@ export function EditorLayout() {
   ]
 
   return (
-    <div className="h-screen w-screen flex flex-col bg-slate-950 text-slate-100 overflow-hidden">
+    <div className="h-screen w-screen flex flex-col bg-slate-950 text-slate-100 overflow-hidden" style={{ '--overlay-font-family': theme.fontFamily } as React.CSSProperties}>
       {/* ── Top Toolbar ─────────────────────────────────── */}
       <header className="h-11 border-b border-white/5 bg-slate-900/80 backdrop-blur-sm flex items-center px-3 gap-1.5 shrink-0">
         {/* Logo & Project Name */}

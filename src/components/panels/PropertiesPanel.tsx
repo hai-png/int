@@ -558,6 +558,16 @@ function HotspotInfoSection({ hotspot }: { hotspot: Hotspot }) {
           </div>
         </div>
       )}
+      <div className="space-y-1">
+        <label className="text-[9px] text-slate-500">Attach to mesh</label>
+        <input
+          type="text"
+          value={hotspot.attachedTo || ''}
+          onChange={(e) => updateHotspot(hotspot.id, { attachedTo: e.target.value || undefined })}
+          placeholder="Type mesh name..."
+          className="w-full px-2 py-1 text-xs bg-slate-800 border border-white/10 rounded text-slate-300 focus:outline-none focus:border-emerald-500"
+        />
+      </div>
     </div>
   )
 }
@@ -1024,6 +1034,19 @@ function ActionFields({
               }}
               placeholder="mesh1, mesh2, mesh3"
               className="w-full px-1.5 py-0.5 text-[10px] bg-slate-700/50 border border-white/5 rounded text-slate-400 focus:outline-none focus:border-emerald-500/50"
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-[9px] text-slate-500 flex items-center gap-1">
+              Condition
+              <span className="text-[8px] text-slate-600 cursor-help" title="e.g. variable:myVar > 5, variable:isOpen === true">?</span>
+            </label>
+            <input
+              type="text"
+              value={action.condition || ''}
+              onChange={(e) => update({ condition: e.target.value })}
+              placeholder="e.g. variable:myVar > 5"
+              className="w-full px-2 py-1 text-xs bg-slate-800 border border-white/10 rounded text-slate-300 focus:outline-none focus:border-emerald-500"
             />
           </div>
         </div>

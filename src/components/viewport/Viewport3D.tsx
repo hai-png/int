@@ -563,7 +563,8 @@ function ClickToAddHotspot() {
         id,
         name: `Hotspot ${id.slice(-4)}`,
         type: addingHotspotType,
-        position: [point.x, point.y, point.z] as Vec3,
+        position: addingHotspotType === '2D' ? [0, 0, 0] as Vec3 : [point.x, point.y, point.z] as Vec3,
+        offset: addingHotspotType === '2D' ? [50, 50, 0] as Vec3 : undefined,
         icon: '📍',
         label: 'New Hotspot',
         behaviors: [],
@@ -809,12 +810,21 @@ function MeasurementClickHandler() {
 
 function MeasurementClickHandlerInner() {
   const { addMeasurement } = useExperienceStore()
+  const isMeasuring = useExperienceStore((s) => s.isMeasuring)
   const [firstPoint, setFirstPoint] = useState<Vec3 | null>(null)
+  const { scene, raycaster, pointer, camera } = useThree()
 
   const handleClick = useCallback(
-    (e: ThreeEvent<MouseEvent>) => {
+    (e: ThreeEvent<PointerEvent>) => {
+      if (!isMeasuring) return
       e.stopPropagation()
-      const pt: Vec3 = [e.point.x, e.point.y, e.point.z]
+
+      // Raycast against actual geometry in the scene
+      raycaster.setFromCamera(pointer, camera)
+      const intersects = raycaster.intersectObjects(scene.children, true)
+      const validHit = intersects.find(i => i.object.type === 'Mesh' && !i.object.userData?.isHelper)
+
+      const pt: Vec3 = validHit ? [validHit.point.x, validHit.point.y, validHit.point.z] : [e.point.x, e.point.y, e.point.z]
 
       if (!firstPoint) {
         setFirstPoint(pt)
@@ -833,28 +843,18 @@ function MeasurementClickHandlerInner() {
         setFirstPoint(null)
       }
     },
-    [firstPoint, addMeasurement]
+    [isMeasuring, firstPoint, addMeasurement, raycaster, pointer, camera, scene]
   )
 
   return (
-    <>
-      <mesh
-        rotation={[-Math.PI / 2, 0, 0]}
-        position={[0, 0, 0]}
-        visible={false}
-        onClick={handleClick}
-      >
-        <planeGeometry args={[50, 50]} />
-        <meshBasicMaterial transparent opacity={0} />
-      </mesh>
-      {/* Show first point indicator */}
+    <group onPointerDown={handleClick}>
       {firstPoint && (
         <mesh position={firstPoint}>
           <sphereGeometry args={[0.06, 12, 12]} />
           <meshBasicMaterial color="#f59e0b" />
         </mesh>
       )}
-    </>
+    </group>
   )
 }
 
@@ -960,12 +960,22 @@ function PostProcessingEffects() {
   }
   if (screenSpaceReflections) {
     // SSR effect is not available in @react-three/postprocessing v3.x
-    // Silently skipped — the UI toggle remains in ThemePanel for project compatibility
+    console.warn('SSR is not available in @react-three/postprocessing v3.x')
   }
+
+  const effectsMemoized = useMemo(() => effects, [
+    bloom, bloomIntensity, bloomThreshold,
+    ssao, ssaoRadius, ssaoIntensity,
+    vignette, vignetteOffset, vignetteDarkness,
+    depthOfField, dofFocusDistance, dofFocalLength, dofBokehScale,
+    chromaticAberration, caOffset,
+    colorGrading, cgBrightness, cgContrast, cgSaturation,
+    screenSpaceReflections, caOffsetVec,
+  ])
 
   return (
     <EffectComposer>
-      {effects}
+      {effectsMemoized}
     </EffectComposer>
   )
 }
@@ -1043,42 +1053,61 @@ function PathTracerOverlay() {
 }
 
 // ─── GPU Path Tracer (three-gpu-pathtracer) ──────────────
+// NOTE: three-gpu-pathtracer requires a THREE.WebGLRenderer, not a raw WebGL2 context.
+// It conflicts with the R3F render loop when sharing the same canvas.
+// We use a separate renderer on a separate canvas to avoid conflicts.
 
 function GPUPathTracer() {
-  const { pathTracerEnabled, pathTracerMaxSamples, pathTracerSamples, resetPathTracerSamples, incrementPathTracerSamples } = useExperienceStore()
-  const { gl, scene, camera } = useThree()
+  const enabled = useExperienceStore((s) => s.pathTracerEnabled)
+  const maxSamples = useExperienceStore((s) => s.pathTracerMaxSamples)
+  const incrementSamples = useExperienceStore((s) => s.incrementPathTracerSamples)
+  const resetSamples = useExperienceStore((s) => s.resetPathTracerSamples)
+  const samples = useExperienceStore((s) => s.pathTracerSamples)
+  const { scene, camera } = useThree()
+  const rendererRef = useRef<THREE.WebGLRenderer | null>(null)
   const tracerRef = useRef<any>(null)
-  const enabledRef = useRef(false)
+  const [status, setStatus] = useState<'idle' | 'init' | 'rendering' | 'done' | 'error'>('idle')
 
   useEffect(() => {
-    if (!pathTracerEnabled) {
+    if (!enabled) {
+      setStatus('idle')
+      resetSamples()
       if (tracerRef.current) {
         try { tracerRef.current.dispose() } catch {}
         tracerRef.current = null
       }
-      enabledRef.current = false
+      if (rendererRef.current) {
+        rendererRef.current.dispose()
+        rendererRef.current = null
+      }
       return
     }
 
-    // Only reinitialize if not already enabled
-    if (enabledRef.current) return
-    enabledRef.current = true
+    setStatus('init')
 
-    resetPathTracerSamples()
-
-    // Dynamic import to avoid SSR issues
-    import('three-gpu-pathtracer').then(({ WebGLPathTracer }) => {
+    import('three-gpu-pathtracer').then((mod) => {
+      const WebGLPathTracer = mod.WebGLPathTracer
+      if (!WebGLPathTracer) {
+        setStatus('error')
+        return
+      }
       try {
-        const tracer = new WebGLPathTracer(gl)
+        // Create a separate WebGLRenderer for the path tracer
+        const renderer = new THREE.WebGLRenderer({ antialias: false })
+        renderer.setSize(window.innerWidth, window.innerHeight)
+        rendererRef.current = renderer
+
+        const tracer = new WebGLPathTracer(renderer)
         tracer.setScene(scene, camera)
         tracerRef.current = tracer
+        setStatus('rendering')
       } catch (err) {
         console.warn('[GPUPathTracer] Init failed:', err)
-        enabledRef.current = false
+        setStatus('error')
       }
-    }).catch((err) => {
-      console.warn('[GPUPathTracer] Import failed:', err)
-      enabledRef.current = false
+    }).catch(() => {
+      console.warn('three-gpu-pathtracer not available — path tracing disabled')
+      setStatus('error')
     })
 
     return () => {
@@ -1086,23 +1115,58 @@ function GPUPathTracer() {
         try { tracerRef.current.dispose() } catch {}
         tracerRef.current = null
       }
-      enabledRef.current = false
-    }
-  }, [pathTracerEnabled, gl, scene, camera, resetPathTracerSamples])
-
-  useFrame(() => {
-    if (!pathTracerEnabled || !tracerRef.current || !enabledRef.current) return
-    if (pathTracerSamples < pathTracerMaxSamples) {
-      try {
-        tracerRef.current.renderSample()
-        incrementPathTracerSamples()
-      } catch {
-        // Silently handle render errors
+      if (rendererRef.current) {
+        rendererRef.current.dispose()
+        rendererRef.current = null
       }
     }
-  })
+  }, [enabled, scene, camera, resetSamples])
 
-  return null
+  // Timer-based rendering instead of useFrame to avoid R3F conflicts
+  useEffect(() => {
+    if (!enabled || status !== 'rendering' || !tracerRef.current) return
+
+    const interval = setInterval(() => {
+      if (samples >= maxSamples) {
+        setStatus('done')
+        clearInterval(interval)
+        return
+      }
+      try {
+        tracerRef.current.renderSample()
+        incrementSamples()
+      } catch {
+        clearInterval(interval)
+        setStatus('error')
+      }
+    }, 32) // ~30fps for path tracing
+
+    return () => clearInterval(interval)
+  }, [enabled, status, samples, maxSamples, incrementSamples])
+
+  if (!enabled) return null
+
+  return (
+    <Html fullscreen style={{ pointerEvents: 'none' }}>
+      <div style={{
+        position: 'absolute',
+        top: 10,
+        right: 10,
+        background: 'rgba(0,0,0,0.8)',
+        color: '#fff',
+        padding: '8px 14px',
+        borderRadius: 8,
+        fontSize: 12,
+        fontFamily: 'Inter, sans-serif',
+        zIndex: 1000,
+      }}>
+        {status === 'init' && 'Initializing path tracer...'}
+        {status === 'rendering' && `Path tracing: ${samples}/${maxSamples} samples`}
+        {status === 'done' && `Path tracing complete (${maxSamples} samples)`}
+        {status === 'error' && 'Path tracer unavailable'}
+      </div>
+    </Html>
+  )
 }
 
 // ─── Hotspot Transform Controls (single unified component) ────
@@ -1346,59 +1410,105 @@ const demoNodeToMeshName: Record<string, string> = {
   demo_cube_lime: 'cube_lime',
 }
 
-function SceneNodeVisibilitySync() {
-  const { sceneNodes, model } = useExperienceStore()
+function SceneVisibilitySync() {
+  const sceneNodes = useExperienceStore((s) => s.sceneNodes)
+  const toggleNodeVisibility = useExperienceStore((s) => s.toggleNodeVisibility)
   const { scene } = useThree()
+  const lastSyncRef = useRef<Map<string, boolean>>(new Map())
 
+  // Build flat map of sceneNodeId → visible from tree
+  const buildVisibilityMap = useCallback((nodes: SceneNode[], map: Record<string, boolean> = {}) => {
+    for (const n of nodes) {
+      map[n.id] = n.visible
+      if (n.children) buildVisibilityMap(n.children, map)
+    }
+    return map
+  }, [])
+
+  // Store → Three.js sync
   useEffect(() => {
-    if (sceneNodes.length === 0) return
-
-    const hiddenIds = new Set<string>()
-    // Also collect name/uuid -> id mappings from all scene nodes
-    const nameToNodeId: Record<string, string> = {}
-    const uuidToNodeId: Record<string, string> = {}
-    const meshNameToNodeId: Record<string, string> = {}
-
-    function collectHiddenAndMappings(nodes: typeof sceneNodes) {
-      for (const n of nodes) {
-        if (!n.visible) hiddenIds.add(n.id)
-        // Build name mapping
-        if (n.name) nameToNodeId[n.name] = n.id
-        // Build uuid mapping from userData
-        if (n.userData?.uuid) uuidToNodeId[n.userData.uuid as string] = n.id
-        // Build meshName mapping from userData
-        if (n.userData?.meshName) meshNameToNodeId[n.userData.meshName as string] = n.id
-        if (n.children) collectHiddenAndMappings(n.children)
-      }
-    }
-    collectHiddenAndMappings(sceneNodes)
-
-    // Also add demo scene mappings for backward compatibility
-    for (const [nodeId, meshName] of Object.entries(demoNodeToMeshName)) {
-      meshNameToNodeId[meshName] = nodeId
-    }
-
-    scene.traverse((obj) => {
-      // Check demo scene match by mesh name
-      if (obj.name && obj.name in meshNameToNodeId) {
-        const nodeId = meshNameToNodeId[obj.name]
-        obj.visible = !hiddenIds.has(nodeId)
-        return
-      }
-      // Check match by object name to scene node name
-      if (obj.name && obj.name in nameToNodeId) {
-        const nodeId = nameToNodeId[obj.name]
-        obj.visible = !hiddenIds.has(nodeId)
-        return
-      }
-      // Check match by UUID
-      if (obj.uuid && obj.uuid in uuidToNodeId) {
-        const nodeId = uuidToNodeId[obj.uuid]
-        obj.visible = !hiddenIds.has(nodeId)
-        return
+    const visibilityMap = buildVisibilityMap(sceneNodes)
+    scene.traverse((obj: any) => {
+      const nodeId = obj.userData?.sceneNodeId as string | undefined
+      if (nodeId && nodeId in visibilityMap) {
+        obj.visible = visibilityMap[nodeId]
       }
     })
-  }, [sceneNodes, scene, model])
+  }, [sceneNodes, scene, buildVisibilityMap])
+
+  // Three.js → Store sync (detect external visibility changes)
+  useFrame(() => {
+    const visibilityMap = buildVisibilityMap(sceneNodes)
+    scene.traverse((obj: any) => {
+      const nodeId = obj.userData?.sceneNodeId as string | undefined
+      if (!nodeId) return
+      const lastKnown = lastSyncRef.current.get(nodeId)
+      if (lastKnown !== undefined && lastKnown !== obj.visible && nodeId in visibilityMap) {
+        if (visibilityMap[nodeId] !== obj.visible) {
+          toggleNodeVisibility(nodeId)
+        }
+      }
+      lastSyncRef.current.set(nodeId, obj.visible)
+    })
+  })
+
+  return null
+}
+
+// Legacy alias for backward compatibility
+const SceneNodeVisibilitySync = SceneVisibilitySync
+
+// ─── Smooth Animated Transform Helper ─────────────────────
+
+function tweenTransform(obj: THREE.Object3D, target: { position?: Vec3; rotation?: Vec3; scale?: Vec3 }, duration: number = 1000) {
+  const startPos = obj.position.clone()
+  const startRot = new THREE.Euler().copy(obj.rotation)
+  const startScale = obj.scale.clone()
+  const startTime = performance.now()
+  const targetPos = target.position ? new THREE.Vector3(...target.position) : null
+  const targetRot = target.rotation ? new THREE.Euler(...target.rotation) : null
+  const targetScale = target.scale ? new THREE.Vector3(...target.scale) : null
+
+  const animate = () => {
+    const elapsed = performance.now() - startTime
+    const t = Math.min(elapsed / duration, 1)
+    const eased = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t
+
+    if (targetPos) obj.position.lerpVectors(startPos, targetPos, eased)
+    if (targetRot) {
+      obj.rotation.x = startRot.x + (targetRot.x - startRot.x) * eased
+      obj.rotation.y = startRot.y + (targetRot.y - startRot.y) * eased
+      obj.rotation.z = startRot.z + (targetRot.z - startRot.z) * eased
+    }
+    if (targetScale) obj.scale.lerpVectors(startScale, targetScale, eased)
+
+    if (t < 1) requestAnimationFrame(animate)
+  }
+  requestAnimationFrame(animate)
+}
+
+// ─── Tone Mapping Updater ────────────────────────────────
+
+function ToneMappingUpdater() {
+  const toneMappingName = useExperienceStore((s) => s.theme.postProcessing.toneMapping)
+  const exposure = useExperienceStore((s) => s.theme.postProcessing.toneMappingExposure)
+  const { gl } = useThree()
+
+  const getToneMapping = (name: string): THREE.ToneMapping => {
+    switch (name) {
+      case 'aces': return THREE.ACESFilmicToneMapping
+      case 'reinhard': return THREE.ReinhardToneMapping
+      case 'cineon': return THREE.CineonToneMapping
+      case 'agx': return THREE.AgXToneMapping
+      case 'linear': return THREE.LinearToneMapping
+      default: return THREE.ACESFilmicToneMapping
+    }
+  }
+
+  useFrame(() => {
+    gl.toneMapping = getToneMapping(toneMappingName)
+    gl.toneMappingExposure = exposure
+  })
 
   return null
 }
@@ -1795,6 +1905,27 @@ function executeAction(action: ActionDef) {
       if (action.intensity !== undefined) {
         useExperienceStore.getState().setEnvironment({ intensity: action.intensity })
       }
+      // Handle modifyLight sub-action
+      if (action.action === 'modifyLight' && action.lightName) {
+        const r3fScene = (globalThis as Record<string, unknown>).__r3fScene as THREE.Scene | undefined
+        if (r3fScene) {
+          r3fScene.traverse((obj: any) => {
+            if (obj.isLight && obj.name === action.lightName) {
+              if (action.color) obj.color.set(action.color)
+              if (action.intensity !== undefined) obj.intensity = action.intensity
+            }
+          })
+          // Also update store
+          const lightState = useExperienceStore.getState()
+          const light = lightState.lights.find(l => l.name === action.lightName)
+          if (light) {
+            const updates: any = {}
+            if (action.color) updates.color = action.color
+            if (action.intensity !== undefined) updates.intensity = action.intensity
+            lightState.updateLight(light.id, updates)
+          }
+        }
+      }
       break
     }
 
@@ -1824,24 +1955,38 @@ function executeAction(action: ActionDef) {
       // Actually switch material variants on scene objects
       const sceneRef2 = (globalThis as Record<string, unknown>).__r3fScene as THREE.Scene | undefined
       if (sceneRef2 && action.affects) {
-        // Apply variant by modifying specified materials/meshes
-        if (action.affects.materials) {
-          sceneRef2.traverse((obj) => {
-            const mesh = obj as unknown as THREE.Mesh
-            if (mesh.material && action.affects?.materials?.includes(mesh.name)) {
-              const mat = mesh.material as THREE.MeshStandardMaterial
-              // Apply variant properties based on variantName
-              if (action.variantName) {
-                // Variant switching toggles visibility of specified meshes
-                mesh.visible = true
-              }
+        // Store previous state for restoration
+        const prevState: Map<string, any> = new Map()
+
+        // Apply variant changes to meshes
+        if (action.affects.meshes) {
+          sceneRef2.traverse((obj: any) => {
+            if (obj.isMesh && action.affects?.meshes?.includes(obj.name)) {
+              prevState.set(obj.name, {
+                visible: obj.visible,
+                color: obj.material?.color?.getHexString(),
+                metalness: obj.material?.metalness,
+                roughness: obj.material?.roughness,
+              })
+              if (action.visibilityAction === 'hide') obj.visible = false
+              else if (action.visibilityAction === 'show') obj.visible = true
+              else obj.visible = !obj.visible
             }
           })
         }
-        if (action.affects.meshes) {
-          sceneRef2.traverse((obj) => {
-            if (action.affects?.meshes?.includes(obj.name)) {
-              obj.visible = !obj.visible
+
+        // Apply material changes if specified
+        if (action.affects.materials) {
+          sceneRef2.traverse((obj: any) => {
+            if (obj.isMesh && obj.material && action.affects?.materials?.includes(obj.material.name)) {
+              prevState.set(obj.material.name, {
+                color: obj.material.color?.getHexString(),
+                metalness: obj.material.metalness,
+                roughness: obj.material.roughness,
+              })
+              if (action.color) obj.material.color.set(action.color)
+              if (action.intensity !== undefined && obj.material.metalness !== undefined) obj.material.metalness = action.intensity
+              if (action.value !== undefined && obj.material.roughness !== undefined) obj.material.roughness = action.value as number
             }
           })
         }
@@ -1855,7 +2000,7 @@ function executeAction(action: ActionDef) {
     }
 
     case 'transform': {
-      // Actually transform scene objects
+      // Actually transform scene objects with smooth animation
       const sceneRef3 = (globalThis as Record<string, unknown>).__r3fScene as THREE.Scene | undefined
       if (sceneRef3 && action.target) {
         let foundObj: THREE.Object3D | undefined
@@ -1863,16 +2008,24 @@ function executeAction(action: ActionDef) {
           if (obj.name === action.target && !foundObj) foundObj = obj
         })
         if (foundObj) {
-          if (action.translate) {
-            foundObj.position.add(new THREE.Vector3(...action.translate))
-          }
-          if (action.rotate) {
-            foundObj.rotation.x += THREE.MathUtils.degToRad(action.rotate[0])
-            foundObj.rotation.y += THREE.MathUtils.degToRad(action.rotate[1])
-            foundObj.rotation.z += THREE.MathUtils.degToRad(action.rotate[2])
-          }
-          if (action.scale) {
-            foundObj.scale.multiply(new THREE.Vector3(...action.scale))
+          const target: { position?: Vec3; rotation?: Vec3; scale?: Vec3 } = {}
+          if (action.translate) target.position = [
+            foundObj.position.x + action.translate[0],
+            foundObj.position.y + action.translate[1],
+            foundObj.position.z + action.translate[2],
+          ]
+          if (action.rotate) target.rotation = [
+            foundObj.rotation.x + THREE.MathUtils.degToRad(action.rotate[0]),
+            foundObj.rotation.y + THREE.MathUtils.degToRad(action.rotate[1]),
+            foundObj.rotation.z + THREE.MathUtils.degToRad(action.rotate[2]),
+          ]
+          if (action.scale) target.scale = [
+            foundObj.scale.x * action.scale[0],
+            foundObj.scale.y * action.scale[1],
+            foundObj.scale.z * action.scale[2],
+          ]
+          if (target.position || target.rotation || target.scale) {
+            tweenTransform(foundObj, target, action.duration || 1000)
           }
         }
       }
@@ -2103,16 +2256,7 @@ function DynamicLights() {
       {lights.map((l: LightConfig) => {
         if (l.type === 'ambient') return <ambientLight key={l.id} color={l.color} intensity={l.intensity} />
         if (l.type === 'directional') return (
-          <group key={l.id}>
-            <directionalLight
-              color={l.color}
-              intensity={l.intensity}
-              position={l.position}
-              castShadow={l.castShadow}
-              shadow-mapSize={[2048, 2048]}
-            />
-            <LightHelper type="directional" position={l.position} color={l.color} />
-          </group>
+          <DirectionalLightWithTarget key={l.id} light={l} />
         )
         if (l.type === 'point') return (
           <group key={l.id}>
@@ -2121,10 +2265,7 @@ function DynamicLights() {
           </group>
         )
         if (l.type === 'spot') return (
-          <group key={l.id}>
-            <SpotLight color={l.color} intensity={l.intensity} position={l.position} angle={l.angle || 0.5} penumbra={l.penumbra || 0} castShadow={l.castShadow} />
-            <LightHelper type="spot" position={l.position} color={l.color} />
-          </group>
+          <SpotLightWithTarget key={l.id} light={l} />
         )
         if (l.type === 'hemisphere') return (
           <hemisphereLight key={l.id} color={l.color} groundColor={l.groundColor || '#444444'} intensity={l.intensity} position={l.position} />
@@ -2132,6 +2273,65 @@ function DynamicLights() {
         return null
       })}
     </>
+  )
+}
+
+function DirectionalLightWithTarget({ light }: { light: LightConfig }) {
+  const lightRef = useRef<THREE.DirectionalLight>(null)
+  const targetRef = useRef<THREE.Object3D>(null)
+
+  useEffect(() => {
+    if (lightRef.current && targetRef.current) {
+      lightRef.current.target = targetRef.current
+      if (light.target) {
+        targetRef.current.position.set(light.target[0], light.target[1], light.target[2])
+      }
+    }
+  }, [light.target])
+
+  return (
+    <group>
+      <directionalLight
+        ref={lightRef}
+        color={light.color}
+        intensity={light.intensity}
+        position={light.position}
+        castShadow={light.castShadow}
+        shadow-mapSize={[2048, 2048]}
+      />
+      <object3D ref={targetRef} position={light.target || [0, 0, 0]} />
+      <LightHelper type="directional" position={light.position} color={light.color} />
+    </group>
+  )
+}
+
+function SpotLightWithTarget({ light }: { light: LightConfig }) {
+  const lightRef = useRef<any>(null)
+  const targetRef = useRef<THREE.Object3D>(null)
+
+  useEffect(() => {
+    if (lightRef.current && targetRef.current) {
+      lightRef.current.target = targetRef.current
+      if (light.target) {
+        targetRef.current.position.set(light.target[0], light.target[1], light.target[2])
+      }
+    }
+  }, [light.target])
+
+  return (
+    <group>
+      <SpotLight
+        ref={lightRef}
+        color={light.color}
+        intensity={light.intensity}
+        position={light.position}
+        angle={light.angle || 0.5}
+        penumbra={light.penumbra || 0}
+        castShadow={light.castShadow}
+      />
+      <object3D ref={targetRef} position={light.target || [0, 0, 0]} />
+      <LightHelper type="spot" position={light.position} color={light.color} />
+    </group>
   )
 }
 
@@ -2371,10 +2571,19 @@ function AnimationMixerHelper() {
 
     // Find animation clips in the loaded scene
     const clips: THREE.AnimationClip[] = []
+    // Check scene root
+    if ((scene as any).animations?.length) {
+      clips.push(...(scene as any).animations)
+    }
+    // Also check all objects
     scene.traverse((obj) => {
       const anyObj = obj as unknown as Record<string, unknown>
       if (anyObj.animations && Array.isArray(anyObj.animations)) {
-        clips.push(...(anyObj.animations as THREE.AnimationClip[]))
+        for (const clip of anyObj.animations as THREE.AnimationClip[]) {
+          if (!clips.find(c => c.name === clip.name && c.duration === clip.duration)) {
+            clips.push(clip)
+          }
+        }
       }
     })
 
@@ -2645,6 +2854,7 @@ export function Viewport3D() {
           <ObjectTransformControls />
           <SceneNodeVisibilitySync />
           <PostProcessingEffects />
+          <ToneMappingUpdater />
           <GPUPathTracer />
           <PathTracerOverlay />
           <SceneStatsOverlay />

@@ -145,6 +145,9 @@ function buildSceneNodesFromThreeScene(scene: THREE.Scene): SceneNode[] {
       children: children.length > 0 ? children : undefined,
       userData: { uuid: obj.uuid, meshName: obj.name },
     }
+
+    // Write ID to userData for visibility sync
+    obj.userData.sceneNodeId = `node_${obj.name || obj.uuid.slice(0, 8)}`
   }
 
   const nodes: SceneNode[] = []

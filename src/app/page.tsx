@@ -1,6 +1,7 @@
 'use client'
 
 import dynamic from 'next/dynamic'
+import { ErrorBoundary } from '@/components/ErrorBoundary'
 
 // Dynamic import to avoid SSR issues with Three.js
 const EditorLayout = dynamic(
@@ -33,5 +34,9 @@ const EditorLayout = dynamic(
 )
 
 export default function Home() {
-  return <EditorLayout />
+  return (
+    <ErrorBoundary>
+      <EditorLayout />
+    </ErrorBoundary>
+  )
 }
